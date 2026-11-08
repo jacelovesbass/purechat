@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
-import { readZip, readLooseImages, dedupeNames, exportPack } from '../lib/packs.js';
+import { readZip, readLooseImages, exportPack } from '../lib/packs.js';
+import { installPack } from '../lib/install.js';
 
 export function EmojiSheet({ room, name, packs, emoji, onSendEmoji, onClose }) {
   const [busy, setBusy] = useState('');
@@ -12,19 +13,10 @@ export function EmojiSheet({ room, name, packs, emoji, onSendEmoji, onClose }) {
     setErr('');
     try {
       const pack = await read();
-      const renamed = dedupeNames(pack.emoji, emoji.map(e => e.name));
-      const clashes = renamed.filter((e, i) => e.name !== pack.emoji[i].name).length;
-      setBusy(`Adding ${renamed.length} emoji...`);
-      const { data: row, error } = await supabase.from('packs')
-        .insert({ room_id: room.id, name: pack.name, author: pack.author, added_by: name })
-        .select().single();
-      if (error) throw error;
-      const { error: e2 } = await supabase.from('emoji')
-        .insert(renamed.map(e => ({ pack_id: row.id, name: e.name, url: e.url })));
-      if (e2) {
-        await supabase.from('packs').delete().eq('id', row.id);
-        throw e2;
-      }
+      setBusy(`Adding ${pack.emoji.length} emoji...`);
+      const { clashes } = await installPack({
+        roomId: room.id, addedBy: name, pack, takenNames: emoji.map(e => e.name),
+      });
       if (clashes) setErr(`${clashes} name${clashes > 1 ? 's' : ''} already in use here, renamed so nothing is ambiguous.`);
     } catch (ex) {
       setErr(ex.message || String(ex));

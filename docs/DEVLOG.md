@@ -8,6 +8,53 @@ that would otherwise have to be rediscovered.
 
 ---
 
+## 2026-11-08 — Kits: a group's emoji, GIFs and games in one file
+
+The MD's ask: take everything a chat has collected and load it into a new one
+in a single file. **A kit is a zip of zips**, which is the whole design and the
+reason it was cheap.
+
+Packs and games were already self-describing zips with their own manifests, so
+a kit adds `kit.json` and nothing else. Three things fall out of that for free:
+
+- **No new parsing.** Loading a kit feeds each inner file to the same importer
+  a person uses when they drag a pack in by hand.
+- **A pack pulled out of a kit is still a pack.** Unzip it, send somebody
+  `packs/faces.zip`, and it imports on its own.
+- **The link property survives.** A GIF pack whose entries are all URLs is
+  still a few hundred bytes inside a kit.
+
+**Messages and members are deliberately not in it.** This is a kit, not a
+backup. Copying a conversation into another group is a different feature with
+worse implications.
+
+**It lives in the People sheet**, on the MD's call, rather than as a fifth
+button on the bar. That sheet is already the group-level surface (join code,
+invite, leave), and a kit is not something you reach for mid-sentence.
+
+**The install paths were merged first.** The emoji sheet and the games sheet
+each did their own inserts, and the kit loader would have been a third. That is
+how two importers end up disagreeing about what a clashing shortcode does, so
+there is now one `installPack` and one `installGame` and all three use them.
+
+**Two shapes, both found by running it, neither by reading it.** `exportPack`
+returns `{ blob, files }` and `exportGame` returns a Blob, which is an easy
+thing to miss when nesting one inside the other. And JSZip will not reliably
+nest a Blob at all: it fails with *"Can't read the data of packs/faces.zip. Is
+it in a supported JavaScript type"*, which is a confusing way to say "give me
+an ArrayBuffer". Both now go in as ArrayBuffers.
+
+**The test is the round trip**, not the file listing. It builds a group with a
+pack and a game, saves the kit, makes a second group, loads it, and then checks
+the emoji are all there, the game kept its proper name rather than its
+filename, **and that the game still runs**. A test that asserted the zip
+contained the right entries would have passed every one of the versions that
+did not work.
+
+**135 tests across 19 suites, all passing.**
+
+---
+
 ## 2026-11-07 — The database is closed
 
 The open item from 2026-11-06, standing through four sessions. Every table said

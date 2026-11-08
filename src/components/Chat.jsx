@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
+import { buildKit, readKit, describeKit } from '../lib/kit.js';
+import { readZip } from '../lib/packs.js';
+import { readGame } from '../lib/games.js';
+import { installPack, installGame } from '../lib/install.js';
 import { encodeShortcodes } from '../lib/packs.js';
 import { Halo } from './Halo.jsx';
 import { Body } from './Body.jsx';
@@ -12,6 +16,9 @@ export function Chat({ name, room, onBack, onForget }) {
   const [people, setPeople] = useState([]);
   const [online, setOnline] = useState([]);
   const [showPeople, setShowPeople] = useState(false);
+  const [kitBusy, setKitBusy] = useState('');
+  const [kitErr, setKitErr] = useState('');
+  const kitRef = useRef(null);
   const [packs, setPacks] = useState([]);
   const [emoji, setEmoji] = useState([]);
   // Which tool's sheet is open, by id. Chat does not know what any of them do.
@@ -132,6 +139,75 @@ export function Chat({ name, room, onBack, onForget }) {
       who made it rather than after the round trip. */
   const patch = m => setMsgs(prev => prev.map(x => (x.id === m.id ? m : x)));
 
+  /**
+   * Save everything this group brought with it: emoji packs, the GIF library
+   * and the games, as one file. Messages and members are deliberately not in
+   * it. This is a kit, not a backup.
+   */
+  async function saveKit() {
+    setKitErr('');
+    setKitBusy('Packing...');
+    try {
+      const { data: gs } = await supabase.from('games').select('*')
+        .eq('room_id', room.id).order('created_at');
+      const { blob, manifest } = await buildKit({
+        roomName: room.name,
+        packs,
+        emojiFor: p => emoji.filter(e => e.pack_id === p.id),
+        games: gs || [],
+      });
+      if (!manifest.packs.length && !manifest.games.length) {
+        setKitErr('Nothing to save yet: no packs and no games.');
+        return;
+      }
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${room.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-kit.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    } catch (ex) {
+      setKitErr(ex.message || String(ex));
+    } finally {
+      setKitBusy('');
+    }
+  }
+
+  /** Load a kit into this group. Adds, never replaces. */
+  async function loadKit(file) {
+    setKitErr('');
+    setKitBusy('Reading...');
+    try {
+      const kit = await readKit(file);
+      let clashes = 0;
+      const taken = emoji.map(e => e.name);
+
+      for (const entry of kit.packs) {
+        setKitBusy(`Adding ${entry.name}...`);
+        const pack = await readZip(entry.file);
+        const r = await installPack({
+          roomId: room.id, addedBy: name, pack, takenNames: taken,
+        });
+        clashes += r.clashes;
+        taken.push(...pack.emoji.map(e => e.name));
+      }
+
+      for (const entry of kit.games) {
+        setKitBusy(`Adding ${entry.name}...`);
+        await installGame({ roomId: room.id, addedBy: name, game: await readGame(entry.file) });
+      }
+
+      setKitErr(clashes
+        ? `Added ${describeKit(kit)}. ${clashes} shortcode${clashes > 1 ? 's were' : ' was'} already in use here and got renamed.`
+        : `Added ${describeKit(kit)}.`);
+    } catch (ex) {
+      setKitErr(ex.message || String(ex));
+    } finally {
+      setKitBusy('');
+    }
+  }
+
   /** Send a message a tool built, rather than something typed. */
   async function sendStructured({ kind = 'text', payload = null, body = '' }) {
     const { error } = await supabase.from('messages')
@@ -187,6 +263,23 @@ export function Chat({ name, room, onBack, onForget }) {
                 <span className="muted when">{online.includes(p.name) ? 'online' : 'offline'}</span>
               </div>
             ))}
+            <div className="kit">
+              <div className="kit-head">Emoji, GIFs and games</div>
+              <div className="kit-actions">
+                <button className="ghost" disabled={Boolean(kitBusy)} onClick={saveKit}>Save kit</button>
+                <button className="ghost" disabled={Boolean(kitBusy)}
+                        onClick={() => kitRef.current.click()}>Load kit</button>
+              </div>
+              {kitBusy && <p className="muted">{kitBusy}</p>}
+              {kitErr && <p className="muted">{kitErr}</p>}
+              <p className="muted hint">
+                One file holding this group's packs, GIFs and games, so a new group can
+                start with them. Messages and people are not included.
+              </p>
+              <input ref={kitRef} type="file" accept=".zip" hidden
+                     onChange={e => { const f = e.target.files[0]; e.target.value = ''; if (f) loadKit(f); }} />
+            </div>
+
             <button className="leave" onClick={onForget}>Forget this group</button>
             <p className="muted hint">Forgetting removes it from your list on this device. Anyone with the code can still get in, and nothing is deleted for the others.</p>
           </div>

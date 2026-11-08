@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
 import { readGame, exportGame } from '../lib/games.js';
+import { installGame } from '../lib/install.js';
 
 /**
  * Games: single-file HTML the group brings with it, run in a sandbox.
@@ -77,11 +78,7 @@ function GamesSheet({ room, name, onSend, onClose }) {
     setErr('');
     try {
       const g = await readGame(file);
-      const { error } = await supabase.from('games').insert({
-        room_id: room.id, name: g.name, author: g.author,
-        added_by: name, html: g.html ?? null, url: g.url ?? null,
-      });
-      if (error) throw error;
+      await installGame({ roomId: room.id, addedBy: name, game: g });
       await load();
     } catch (ex) {
       setErr(ex.message || String(ex));

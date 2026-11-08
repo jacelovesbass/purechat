@@ -526,3 +526,10 @@ button.link { background: none; color: var(--muted); padding: 4px; font-weight: 
 }
 .vboom[disabled] { opacity: .35; }
 .vboom.on { background: #f8b344; color: #241300; }
+
+/* ---------- Kit: a group's packs, GIFs and games in one file ---------- */
+
+.kit { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; }
+.kit-head { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.kit-actions { display: flex; gap: 8px; }
+.kit-actions .ghost { flex: 1; }
