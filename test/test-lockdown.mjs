@@ -148,7 +148,35 @@ check(bobStill?.length === 1,
   'somebody joining under your name does not take your membership',
   'the original Bob was evicted by a name clash');
 
-/* ---- 6. The upgrade path everybody already in a group will take ---- */
+/* ---- 6. A person may own two phones ---- */
+
+// The case the first version got wrong. Identity is per browser, and on iOS
+// the installed app and the browser tab are separate storage, so one person
+// routinely arrives twice. They must still be called what they are called.
+// The rule that used to rename the second arrival was guarding against name
+// squatting inside a private group of friends, which is not a threat anybody
+// has, and it cost a real person their name in the real group.
+{
+  const phone = await signedIn('alice-phone');
+  await phone.rpc('join_room', { p_code: code, p_name: 'Alice' });
+
+  const { data: rows } = await alice.from('members').select('name,user_id').eq('room_id', made.id);
+  const alices = rows.filter(r => r.name === 'Alice');
+  check(alices.length === 2 && new Set(alices.map(r => r.user_id)).size === 2,
+    'a second device keeps your name instead of becoming "Alice (2)"',
+    `Alice rows: ${JSON.stringify(rows.map(r => r.name))}`);
+
+  const { data: phoneSees } = await phone.from('messages').select('id').eq('room_id', made.id);
+  check(phoneSees?.length === 1, 'and the second device can read the group',
+    `the second device sees ${phoneSees?.length} messages`);
+
+  // The first device must not have been displaced by the second.
+  const { data: stillThere } = await alice.from('messages').select('id').eq('room_id', made.id);
+  check(stillThere?.length === 1, 'while the first device keeps working',
+    'the first device lost access when the second arrived');
+}
+
+/* ---- 7. The upgrade path everybody already in a group will take ---- */
 
 // Rows created before identities existed have no owner. The first device to
 // turn up with that name must CLAIM the row, not sit beside it as a duplicate.

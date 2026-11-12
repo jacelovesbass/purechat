@@ -8,6 +8,56 @@ that would otherwise have to be rediscovered.
 
 ---
 
+## 2026-11-12 — A person may own two phones
+
+The MD opened the app and found himself listed as **"Jason (2)"** in his own
+group. A bug I introduced on 2026-11-07, reported by the person it happened to,
+in production.
+
+**What went wrong.** Migration 011 made identity per browser, and kept the old
+rule that a name is unique within a room. Those two things together are a bug.
+On iOS the installed home screen app and the Safari tab are **separate
+storage**, so the same person routinely arrives as two identities. The second
+one found its own name taken and got renamed.
+
+**The rule was guarding against nothing.** It stopped somebody taking your
+name, inside a private invite-only group of friends. Nobody has that threat.
+And before identities existed, *any* device could use *any* name, so there was
+never protection there to lose. It broke the ordinary case to defend an
+imaginary one.
+
+**The model was simply wrong, and the fix is the model.** A membership is one
+row **per identity**; the name is a label on it. Two rows in a room may carry
+the same name, because they are often the same person. The primary key moves
+from `(room_id, name)` to a surrogate id, with a partial unique index on
+`(room_id, user_id)` giving one seat per device. The roster is collapsed by
+name for display, so a person with a phone and a laptop still reads as one
+person.
+
+**A trigger nearly took the change down with it.** `ensure_member` upserted
+`on conflict (room_id, name)` on every message insert, so dropping that key
+would have broken posting. It is also redundant now, and worse than redundant:
+a row it invented would have no owner. It is now a `last_seen` touch and
+nothing else, because joining is `join_room`'s job.
+
+**I had a passing test asserting the wrong thing.** *"Somebody joining under
+your name does not take your membership"* was true, and the behaviour it was
+describing was the bug. The requirement that actually mattered, *"my second
+phone is still me"*, had no test at all. A green suite is not evidence that the
+requirements are right, only that the code matches them.
+
+**And one self-inflicted scare.** The first full run after the migration showed
+every browser suite crashing and only the pure-Node one passing, which looks
+exactly like a schema change breaking the app. The dev server had stopped. The
+shape of the failure (one suite passing, and it being the one that needs no
+browser) was the tell.
+
+**138 tests across 19 suites.** The live group was repaired in the migration:
+the real "Jason (2)" row is "Jason" again, which is only safe now that two
+rows may share a name.
+
+---
+
 ## 2026-11-08 — Kits: a group's emoji, GIFs and games in one file
 
 The MD's ask: take everything a chat has collected and load it into a new one

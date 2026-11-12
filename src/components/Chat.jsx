@@ -54,9 +54,20 @@ export function Chat({ name, room, onBack, onForget }) {
   useEffect(() => {
     let live = true;
 
+    // One row per DEVICE, but people want to see people. Somebody with a
+    // phone and a laptop holds two seats under one name, so the roster is
+    // collapsed by name and keeps whichever was seen most recently.
     const loadPeople = () => supabase.from('members').select('*')
       .eq('room_id', room.id).order('joined_at')
-      .then(({ data }) => live && setPeople(data || []));
+      .then(({ data }) => {
+        if (!live) return;
+        const byName = new Map();
+        for (const m of data || []) {
+          const seen = byName.get(m.name);
+          if (!seen || (m.last_seen || '') > (seen.last_seen || '')) byName.set(m.name, m);
+        }
+        setPeople([...byName.values()]);
+      });
 
     const loadPacks = async () => {
       const { data: ps } = await supabase.from('packs').select('*')
