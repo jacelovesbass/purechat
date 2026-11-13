@@ -74,6 +74,17 @@ post a score. To post one:
 parent.postMessage({ type: 'score', score: 42 }, '*');
 ```
 
+## Installing takes a copy
+
+**A game is snapshotted into the group when it is added.** Editing the source
+afterwards does not reach a copy that is already installed, which is correct
+(a group's game should not change under it without warning) and surprising the
+first time it bites.
+
+To push an update: remove and re-add, or update the row. There is deliberately
+no auto-update, because that would mean a game somebody is playing could be
+swapped for different code mid-session.
+
 ## Limits
 
 - **512 KB** of HTML. Beyond that, host it and use `url`.
