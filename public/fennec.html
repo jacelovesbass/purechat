@@ -411,8 +411,11 @@ const SND = (function(){
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return false;
       ac = new AC();
-      music = ac.createGain(); music.gain.value = 0.9;
-      sfx   = ac.createGain(); sfx.gain.value = 0.9;
+      // Reported as generally too strong. The build between stages is a ratio,
+      // so pulling the whole bed down leaves the arc intact and just makes it
+      // sit under the game rather than on top of it.
+      music = ac.createGain(); music.gain.value = 0.55;
+      sfx   = ac.createGain(); sfx.gain.value = 0.8;
       music.connect(ac.destination); sfx.connect(ac.destination);
       noise = ac.createBuffer(1, ac.sampleRate * 0.6, ac.sampleRate);
       const d = noise.getChannelData(0);
@@ -578,6 +581,15 @@ const SND = (function(){
     // Exposed so a test can measure the output instead of trusting that a node
     // was created. Harmless in play.
     ctx: function(){ return ac; },
+    // Read and write the mix at runtime, so it can be dialled in by ear on a
+    // bench instead of guessed at in source and redeployed to find out.
+    mix: function(){ return MIX.map(r => r.slice()); },
+    setMix: function(m){
+      for (let i = 0; i < MIX.length && i < m.length; i++)
+        for (let j = 0; j < MIX[i].length && j < m[i].length; j++) MIX[i][j] = +m[i][j];
+    },
+    master: function(){ return music ? music.gain.value : 0; },
+    setMaster: function(v){ if (music) music.gain.value = +v; },
     // Restart the sequencer at the top of the loop. Comparing two stages is
     // only meaningful on the same bars: the lead and the chords move through a
     // 20 second cycle, so an unaligned window measures the music, not the mix.
