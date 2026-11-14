@@ -104,6 +104,7 @@ const html = `<!doctype html>
     <pre id="out"></pre>
     <div class="btns">
       <button class="go ghost" id="copy">Copy</button>
+      <button class="go ghost" id="link">Copy link</button>
       <button class="go ghost" id="reset">Reset to shipped</button>
       <button class="go ghost" id="quieter">All 10% quieter</button>
     </div>
@@ -166,7 +167,9 @@ elMaster.oninput = e => { SND.setMaster(+e.target.value); draw(); };
 
 document.getElementById('play').onclick = () => {
   SND.start(); SND.setLevel(stage); SND.rewind();
-  if (SND.master() === 0) SND.setMaster(0.55);
+  // master lives on a gain node, which does not exist until the context does
+  if (pendingMaster !== null){ SND.setMaster(pendingMaster); pendingMaster = null; }
+  else if (SND.master() === 0) SND.setMaster(0.55);
   draw();
 };
 document.getElementById('stop').onclick = () => {
@@ -196,6 +199,35 @@ document.getElementById('quieter').onclick = () => {
 document.getElementById('copy').onclick = () => {
   navigator.clipboard && navigator.clipboard.writeText(elOut.textContent);
 };
+
+/* A mix lives in this page's memory and nowhere else, so moving the sliders
+   and saying "I've changed it" sends nothing to anybody. The hash carries the
+   whole mix, which makes a tuned bench a link you can paste. */
+function encode(){
+  const flat = SND.mix().reduce((a, r) => a.concat(r), []);
+  return '#m=' + flat.map(v => Math.round(v * 1000)).join('.') +
+         '&v=' + Math.round(SND.master() * 100);
+}
+function decode(){
+  const h = location.hash || '';
+  const m = /#m=([\d.]+)&v=(\d+)/.exec(h);
+  if (!m) return false;
+  const flat = m[1].split('.').map(n => +n / 1000);
+  if (flat.length !== 30) return false;
+  const rows = [];
+  for (let i = 0; i < 5; i++) rows.push(flat.slice(i * 6, i * 6 + 6));
+  SND.setMix(rows);
+  pendingMaster = +m[2] / 100;
+  return true;
+}
+let pendingMaster = null;
+document.getElementById('link').onclick = () => {
+  const url = location.origin + location.pathname + encode();
+  if (navigator.clipboard) navigator.clipboard.writeText(url);
+  const b = document.getElementById('link');
+  b.textContent = 'Link copied'; setTimeout(() => { b.textContent = 'Copy link'; }, 1600);
+};
+if (decode()) document.getElementById('out').scrollIntoView({ block: 'nearest' });
 
 SND.setLevel(0);
 draw();

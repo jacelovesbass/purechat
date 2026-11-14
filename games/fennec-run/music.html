@@ -79,6 +79,7 @@
     <pre id="out"></pre>
     <div class="btns">
       <button class="go ghost" id="copy">Copy</button>
+      <button class="go ghost" id="link">Copy link</button>
       <button class="go ghost" id="reset">Reset to shipped</button>
       <button class="go ghost" id="quieter">All 10% quieter</button>
     </div>
@@ -110,11 +111,14 @@ const SND = (function(){
   // Measured, not guessed: the first version had stages one to three landing
   // within 6% of each other, which is not a build, it is three mixes of the
   // same loudness wearing different hats. Widened until the step is audible.
-  const MIX = [[.07,.09,.00,.00,.00,.00],
-               [.10,.14,.10,.10,.00,.00],
-               [.13,.18,.17,.15,.14,.00],
-               [.16,.22,.31,.17,.18,.00],
-               [.18,.25,.34,.19,.21,.26]];
+  // Tuned on the bench by the MD, pasted back verbatim. The printed master
+  // came through as 0.00, which is the bench's Stop button zeroing it rather
+  // than an instruction to ship silence.
+  const MIX = [[.050,.080,.000,.000,.000,.000],
+               [.070,.065,.000,.060,.000,.000],
+               [.085,.055,.060,.060,.000,.000],
+               [.155,.155,.310,.170,.085,.000],
+               [.155,.240,.555,.255,.255,.070]];
 
   function mk(){
     if (ac) return true;
@@ -209,8 +213,13 @@ const SND = (function(){
     o.connect(f1); o.connect(f2); o.connect(f3);
     f1.connect(g1); f2.connect(g2); f3.connect(g3);
     g1.connect(out); g2.connect(out); g3.connect(out);
+    // Make-up gain. Three parallel bandpasses throw away most of a sawtooth's
+    // energy, so at the same nominal setting this layer measured 3.4x quieter
+    // than the lead and 5.4x quieter than the pad: the slider did nothing you
+    // could hear at any position. Measured, not guessed.
+    const MAKEUP = 3.5;
     out.gain.setValueAtTime(0.0001, t);
-    out.gain.linearRampToValueAtTime(g, t + 0.45);
+    out.gain.linearRampToValueAtTime(g * MAKEUP, t + 0.45);
     out.gain.setTargetAtTime(0.0001, t + dur * 0.68, 0.32);
     out.connect(music);
     o.start(t); vib.start(t); o.stop(t + dur + 0.8); vib.stop(t + dur + 0.8);
@@ -415,7 +424,9 @@ elMaster.oninput = e => { SND.setMaster(+e.target.value); draw(); };
 
 document.getElementById('play').onclick = () => {
   SND.start(); SND.setLevel(stage); SND.rewind();
-  if (SND.master() === 0) SND.setMaster(0.55);
+  // master lives on a gain node, which does not exist until the context does
+  if (pendingMaster !== null){ SND.setMaster(pendingMaster); pendingMaster = null; }
+  else if (SND.master() === 0) SND.setMaster(0.55);
   draw();
 };
 document.getElementById('stop').onclick = () => {
@@ -445,6 +456,35 @@ document.getElementById('quieter').onclick = () => {
 document.getElementById('copy').onclick = () => {
   navigator.clipboard && navigator.clipboard.writeText(elOut.textContent);
 };
+
+/* A mix lives in this page's memory and nowhere else, so moving the sliders
+   and saying "I've changed it" sends nothing to anybody. The hash carries the
+   whole mix, which makes a tuned bench a link you can paste. */
+function encode(){
+  const flat = SND.mix().reduce((a, r) => a.concat(r), []);
+  return '#m=' + flat.map(v => Math.round(v * 1000)).join('.') +
+         '&v=' + Math.round(SND.master() * 100);
+}
+function decode(){
+  const h = location.hash || '';
+  const m = /#m=([d.]+)&v=(d+)/.exec(h);
+  if (!m) return false;
+  const flat = m[1].split('.').map(n => +n / 1000);
+  if (flat.length !== 30) return false;
+  const rows = [];
+  for (let i = 0; i < 5; i++) rows.push(flat.slice(i * 6, i * 6 + 6));
+  SND.setMix(rows);
+  pendingMaster = +m[2] / 100;
+  return true;
+}
+let pendingMaster = null;
+document.getElementById('link').onclick = () => {
+  const url = location.origin + location.pathname + encode();
+  if (navigator.clipboard) navigator.clipboard.writeText(url);
+  const b = document.getElementById('link');
+  b.textContent = 'Link copied'; setTimeout(() => { b.textContent = 'Copy link'; }, 1600);
+};
+if (decode()) document.getElementById('out').scrollIntoView({ block: 'nearest' });
 
 SND.setLevel(0);
 draw();

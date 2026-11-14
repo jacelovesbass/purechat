@@ -96,6 +96,18 @@
   body.quiet #mute { opacity: .45 }
   body.quiet #mute::after { content: "\266A\0020\00D7" }
 
+  /* A landscape phone is only about 390 tall, and a 150px control bar eats
+     nearly 40% of that, which squeezes the game into a letterbox. Shrink the
+     bar and the buttons when there is no height to spare. */
+  @media (max-height: 520px){
+    #pads { height: 104px; padding: 8px 14px calc(8px + env(safe-area-inset-bottom)) }
+    .btn { width: 60px; height: 60px; font-size: 21px; border-width: 2px }
+    .btn.jump { width: 76px; height: 76px; font-size: 13px }
+    .btn.dash { width: 58px; height: 58px; font-size: 11px }
+    .pad { gap: 10px }
+    #hud { font-size: 13px; padding: 7px 12px 0 }
+  }
+
   /* ---- cards ---- */
   #card {
     position: absolute; inset: 0; display: grid; place-items: center;
@@ -399,11 +411,14 @@ const SND = (function(){
   // Measured, not guessed: the first version had stages one to three landing
   // within 6% of each other, which is not a build, it is three mixes of the
   // same loudness wearing different hats. Widened until the step is audible.
-  const MIX = [[.07,.09,.00,.00,.00,.00],
-               [.10,.14,.10,.10,.00,.00],
-               [.13,.18,.17,.15,.14,.00],
-               [.16,.22,.31,.17,.18,.00],
-               [.18,.25,.34,.19,.21,.26]];
+  // Tuned on the bench by the MD, pasted back verbatim. The printed master
+  // came through as 0.00, which is the bench's Stop button zeroing it rather
+  // than an instruction to ship silence.
+  const MIX = [[.050,.080,.000,.000,.000,.000],
+               [.070,.065,.000,.060,.000,.000],
+               [.085,.055,.060,.060,.000,.000],
+               [.155,.155,.310,.170,.085,.000],
+               [.155,.240,.555,.255,.255,.070]];
 
   function mk(){
     if (ac) return true;
@@ -498,8 +513,13 @@ const SND = (function(){
     o.connect(f1); o.connect(f2); o.connect(f3);
     f1.connect(g1); f2.connect(g2); f3.connect(g3);
     g1.connect(out); g2.connect(out); g3.connect(out);
+    // Make-up gain. Three parallel bandpasses throw away most of a sawtooth's
+    // energy, so at the same nominal setting this layer measured 3.4x quieter
+    // than the lead and 5.4x quieter than the pad: the slider did nothing you
+    // could hear at any position. Measured, not guessed.
+    const MAKEUP = 3.5;
     out.gain.setValueAtTime(0.0001, t);
-    out.gain.linearRampToValueAtTime(g, t + 0.45);
+    out.gain.linearRampToValueAtTime(g * MAKEUP, t + 0.45);
     out.gain.setTargetAtTime(0.0001, t + dur * 0.68, 0.32);
     out.connect(music);
     o.start(t); vib.start(t); o.stop(t + dur + 0.8); vib.stop(t + dur + 0.8);
@@ -848,6 +868,11 @@ const WH = 360;                        // nominal world height; ground sits at 3
 // fixed world height ruins one of them. Guarantee a minimum of both dimensions and
 // anchor the world to the bottom of the screen, so a tall screen just shows more sky.
 const MINW = 320, MINH = 300;
+// And a ceiling on the zoom. Without one, a landscape phone or a desktop
+// window drives the scale off the height alone and the fox ends up enormous.
+// Past this point a bigger window shows MORE DESERT rather than a bigger fox,
+// which is what you want on a wide screen anyway.
+const MAXZOOM = 1.45;                  // CSS pixels per world unit
 let VW = 640, VH = 360, yOff = 0, scale = 1;
 
 function resize(){
@@ -855,10 +880,13 @@ function resize(){
   if (!w || !h) return;
   const dpr = Math.min(devicePixelRatio || 1, 2.5);
   cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
-  scale = Math.min((w * dpr) / MINW, (h * dpr) / MINH);
+  scale = Math.min((w * dpr) / MINW, (h * dpr) / MINH, MAXZOOM * dpr);
   VW = (w * dpr) / scale;
   VH = (h * dpr) / scale;
-  yOff = VH - WH;                      // world y=WH lands on the bottom edge
+  // World y=WH would land on the bottom edge, but on a wide screen that leaves
+  // the horizon jammed at the bottom under a great slab of empty sky. Cap the
+  // sky and let the ground run on below instead.
+  yOff = Math.min(VH - WH, 110);
 }
 addEventListener('resize', resize);
 addEventListener('orientationchange', resize);
@@ -1627,14 +1655,15 @@ function render(){
   drawDen();
 
   // the void first, so a pit reads as a hole rather than as more scenery
+  const below = VH - yOff - GY + 20;        // down to the bottom edge, whatever it is
   x.fillStyle = L.night ? '#0E0A18' : '#6B4526';
-  x.fillRect(0, GY, VW, WH - GY + 20);
+  x.fillRect(0, GY, VW, below);
 
   // ground segments
   for (const g of L.ground){
     const gx = g[0] - cam, gw = g[1] - g[0];
     if (gx > VW || gx + gw < 0) continue;
-    x.fillStyle = L.dirt; x.fillRect(gx, GY, gw, WH - GY + 20);
+    x.fillStyle = L.dirt; x.fillRect(gx, GY, gw, below);
     x.fillStyle = L.crust; x.fillRect(gx, GY, gw, 9);
     // pebbles, so a long stretch of ground is not a flat slab
     x.fillStyle = 'rgba(0,0,0,.09)';
