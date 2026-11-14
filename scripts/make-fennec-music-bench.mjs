@@ -210,7 +210,7 @@ function encode(){
 }
 function decode(){
   const h = location.hash || '';
-  const m = /#m=([\d.]+)&v=(\d+)/.exec(h);
+  const m = /#m=([\\d.]+)&v=(\\d+)/.exec(h);
   if (!m) return false;
   const flat = m[1].split('.').map(n => +n / 1000);
   if (flat.length !== 30) return false;
