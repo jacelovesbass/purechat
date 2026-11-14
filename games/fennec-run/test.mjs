@@ -39,6 +39,8 @@ check('title card is visible', await p.locator('#card.on').isVisible());
 // title card is the card on screen: later it is the death card and this would
 // pass without ever looking at the right text.
 const title = await p.evaluate(() => document.getElementById('inner').textContent);
+check('the game is titled Feni Fox', /Feni Fox/.test(title) && !/^Fennec[A-Z]/.test(title),
+      title.slice(0, 20).trim());
 check('the title card names the right number of stages',
       /five stretches of real Sahara/i.test(title) &&
       !/(three|two|four)\s+five/i.test(title),
