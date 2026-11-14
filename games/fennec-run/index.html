@@ -3,13 +3,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Fennec</title>
 <style>
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  /* Nothing here is text to be read, and holding a control must not select it.
+     user-select on body alone is not enough: iOS needs the -webkit- prefix, and
+     the long-press callout and the magnifier are separately controlled. */
+  *, *::before, *::after {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-user-drag: none;
+  }
   html, body {
     margin: 0; padding: 0; height: 100%; overflow: hidden;
     background: #11161f;
     font-family: "Avenir Next", "Segoe UI", Roboto, system-ui, sans-serif;
     color: #3A2A18;
-    touch-action: none; user-select: none;
+    touch-action: none;
   }
   #wrap { position: relative; width: 100%; height: 100vh; height: 100dvh;
           overflow: hidden; display: flex; flex-direction: column; }
@@ -35,6 +45,7 @@
     height: 150px; padding: 14px 18px calc(14px + env(safe-area-inset-bottom));
     background: #E8D6B4; border-top: 3px solid #8A6338;
     justify-content: space-between; align-items: center;
+    touch-action: none;
   }
   body.touch #pads { display: flex }
   .pad { display: flex; gap: 14px; align-items: center }
@@ -397,14 +408,35 @@ addEventListener('keydown', e => {
 });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 
+// Each button remembers which finger is holding it. Without that, releasing the
+// jump finger would also release the run button you are still pressing, and a
+// thumb that slides off a button mid-jump would leave it stuck down for good.
 function bindBtn(el, set){
-  const on  = e => { e.preventDefault(); e.stopPropagation(); set(true);  el.classList.add('on'); };
-  const off = e => { e.preventDefault(); e.stopPropagation(); set(false); el.classList.remove('on'); };
+  let id = null;
+  const on = e => {
+    e.preventDefault();
+    if (id !== null) return;
+    id = e.pointerId;
+    try { el.setPointerCapture(id); } catch (_) { /* capture is a nicety */ }
+    set(true); el.classList.add('on');
+  };
+  const off = e => {
+    if (id === null || e.pointerId !== id) return;   // somebody else's finger
+    id = null; set(false); el.classList.remove('on');
+  };
   el.addEventListener('pointerdown', on);
   el.addEventListener('pointerup', off);
   el.addEventListener('pointercancel', off);
-  el.addEventListener('pointerleave', off);
+  // Backstop for the case where capture was never granted and the finger lifted
+  // somewhere else entirely. Matched on pointerId, so it never clears a button
+  // a different finger is still holding.
+  addEventListener('pointerup', off);
+  addEventListener('pointercancel', off);
 }
+// Belt and braces for the selection itself: some browsers start a selection from
+// a drag that began on a control regardless of user-select.
+for (const ev of ['selectstart', 'dragstart', 'contextmenu'])
+  addEventListener(ev, e => e.preventDefault());
 bindBtn(document.getElementById('bL'), v => held.L = v);
 bindBtn(document.getElementById('bR'), v => held.R = v);
 bindBtn(document.getElementById('bJ'), v => { if (v && !held.J) fox.buffer = 8; held.J = v; });
