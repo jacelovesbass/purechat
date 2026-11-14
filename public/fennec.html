@@ -75,6 +75,16 @@
   body.candash .btn.dash { opacity: 1; transform: none; pointer-events: auto }
   .btn.dash.on { background: #6FA8D8; color: #fff }
   #kit { margin-top: 3px; font-size: 13px; letter-spacing: 1px; font-weight: 700 }
+  /* The field note: shown once per species, then never again. */
+  #note {
+    position: absolute; left: 50%; bottom: 14px; transform: translate(-50%, 14px);
+    width: min(400px, calc(100% - 28px));
+    background: rgba(251,240,222,.94); border: 2px solid #8A6338; border-radius: 12px;
+    padding: 9px 13px; font-size: 13px; line-height: 1.4; color: #4A3827;
+    opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s;
+  }
+  #note.on { opacity: 1; transform: translate(-50%, 0) }
+  #note b { display: block; font-size: 13.5px; color: #3A2A18 }
   #mute {
     position: absolute; right: 10px; bottom: 10px;
     width: 34px; height: 34px; border-radius: 50%;
@@ -132,6 +142,7 @@
       <div id="right"><div id="dates"></div><div id="lvl"></div></div>
     </div>
     <div id="mute" role="button" aria-label="Sound on or off"></div>
+    <div id="note"></div>
   </div>
   <div id="pads">
     <div class="pad">
@@ -303,6 +314,50 @@ const P_HURT  = pose({bodyRot:-14, legs:[-18,-12,14,20], tail:-30, earL:24, earR
                       eye:'blink', headRot:-10});
 const IDLE_CYCLE = [pose({}), pose({bodyY:1, squash:.975, earL:2, earR:3, headY:1}),
                     pose({bodyY:1, squash:.975, earL:3, earR:4, headY:1}), pose({eye:'blink'})];
+
+/* ============================================================
+   Field guide
+
+   The desert is real, so the animals in it are the real ones. A fennec is a
+   small omnivore that is hunted by things several times its size, and the
+   game is arranged around that rather than around generic hazards.
+
+   Prey: scorpions and jerboas, both of which a fennec genuinely eats, along
+   with fruit and roots. Predators: the caracal and the Pharaoh eagle-owl,
+   both of which genuinely eat fennecs. Neither can be pounced on, which is
+   the honest version of the relationship.
+
+   The one fact worth building a game around: a fennec does not drink. It
+   takes its water out of what it eats, which is why the melon is worth a
+   heart and why it is never placed anywhere safe.
+   ============================================================ */
+const GUIDE = {
+  date:     ['Date palm fruit',
+             'Plant matter is where a fennec gets most of its water. In the wild it may never drink at all.'],
+  melon:    ['Desert melon',
+             'Melons and roots are a fennec’s water supply in country that has none standing.'],
+  flower:   ['Night bloom',
+             'Fennecs forage after dark, when the Sahara is tens of degrees cooler than at noon.'],
+  scorpion: ['Scorpion',
+             'Prey, not predator. Fennecs hunt and eat scorpions, and take the sting as part of the deal.'],
+  jerboa:   ['Jerboa',
+             'A long-legged desert rodent that hops rather than runs. One of the fennec’s main catches.'],
+  caracal:  ['Caracal',
+             'A desert cat that hunts fennecs. Several times your size, so there is no pouncing on it.'],
+  owl:      ['Pharaoh eagle-owl',
+             'Takes fennec pups out of open ground. The reason a small fox keeps to cover.']
+};
+const seen = {};
+let noteUntil = 0;
+
+function met(kind){
+  if (seen[kind] || !GUIDE[kind]) return;
+  seen[kind] = true;
+  const g = GUIDE[kind];
+  elNote.innerHTML = '<b>' + g[0] + '</b>' + g[1];
+  elNote.classList.add('on');
+  noteUntil = performance.now() + 5200;
+}
 
 /* ============================================================
    Sound
@@ -561,7 +616,10 @@ const LEVELS = [
     melons:  [ {x:942, y:244} ],
     flowers: [ {x:820, y:258} ],
     spikes: [ {x:760, w:54} ],
-    scorps: [ {x:560, a:470, b:690}, {x:1500, a:1420, b:1640} ],
+    scorps:   [ {x:560, a:470, b:690}, {x:1500, a:1420, b:1640} ],
+    jerboas:  [ {x:420, a:300, b:500}, {x:1300, a:1255, b:1365}, {x:2300, a:2265, b:2385} ],
+    caracals: [],
+    owls:     [],
     dates: [].concat(
       row(318, 206, 4), row(498, 156, 3), row(690, 206, 3),
       row(915, 240, 3, 24), row(1075, 198, 4), row(1272, 146, 3),
@@ -579,8 +637,12 @@ const LEVELS = [
     melons:  [ {x:1625, y:246}, {x:2285, y:246} ],
     flowers: [ {x:1000, y:258}, {x:2400, y:196} ],
     spikes: [ {x:430, w:60}, {x:1460, w:54}, {x:2160, w:60} ],
-    scorps: [ {x:340, a:300, b:400}, {x:1030, a:1000, b:1110},
-              {x:1920, a:1870, b:1970}, {x:2600, a:2560, b:2680} ],
+    scorps:   [ {x:340, a:300, b:400}, {x:1030, a:1000, b:1110},
+                {x:1920, a:1870, b:1970}, {x:2600, a:2560, b:2680} ],
+    jerboas:  [ {x:700, a:600, b:800}, {x:1450, a:1400, b:1520},
+                {x:2800, a:2760, b:2880} ],
+    caracals: [ {x:900, a:800, b:1050}, {x:2000, a:1900, b:2150} ],
+    owls:     [],
     dates: [].concat(
       row(315, 196, 3), row(655, 206, 3), row(818, 148, 3),
       row(1018, 178, 4), row(1207, 143, 3), row(1418, 206, 4),
@@ -602,9 +664,15 @@ const LEVELS = [
     melons:  [ {x:1025, y:244}, {x:2565, y:244} ],
     flowers: [ {x:700, y:258}, {x:2000, y:258} ],
     spikes: [ {x:360, w:54}, {x:1180, w:54}, {x:1700, w:60}, {x:2220, w:60}, {x:3020, w:54} ],
-    scorps: [ {x:290, a:250, b:340}, {x:980, a:940, b:1030},
-              {x:1660, a:1620, b:1710}, {x:2160, a:2120, b:2215},
-              {x:2790, a:2740, b:2840}, {x:3180, a:3140, b:3250} ],
+    scorps:   [ {x:290, a:250, b:340}, {x:980, a:940, b:1030},
+                {x:1660, a:1620, b:1710}, {x:2160, a:2120, b:2215},
+                {x:2790, a:2740, b:2840}, {x:3180, a:3140, b:3250} ],
+    jerboas:  [ {x:800, a:750, b:830}, {x:1340, a:1290, b:1380},
+                {x:2380, a:2330, b:2430}, {x:3200, a:3140, b:3250} ],
+    caracals: [ {x:650, a:570, b:900}, {x:1750, a:1600, b:1880},
+                {x:2300, a:2100, b:2450} ],
+    owls:     [ {x:1150, y:120, a:1070, b:1420},
+                {x:2700, y:110, a:2610, b:3000} ],
     dates: [].concat(
       row(262, 206, 3), row(615, 200, 3), row(765, 146, 3), row(955, 200, 3),
       row(1115, 154, 3), row(1305, 206, 3), row(1472, 152, 3), row(1635, 204, 3),
@@ -647,7 +715,7 @@ const fox = { x:60, y:GY, vx:0, vy:0, dir:1, onGround:true, f:0, step:0,
 let lv = 0, L = LEVELS[0], dates = 0, total = 0, runDates = 0;
 let state = 'title';                   // title | play | dead | clear | done
 let cam = 0, t = 0, deathY = 0;
-let scorps = [], pickups = [], parts = [], melons = [], flowers = [];
+let critters = [], pickups = [], parts = [], melons = [], flowers = [];
 let hostName = '';
 
 function loadLevel(i){
@@ -660,21 +728,30 @@ function loadLevel(i){
   flowers = (L.flowers || []).map(m => ({ x:m.x, y:m.y, got:false }));
   SND.setLevel(i);
   dates = 0; cam = 0;
-  scorps  = L.scorps.map(s => ({ x:s.x, a:s.a, b:s.b, dir:1, y:GY, alive:true, w:11 }));
+  const walker = (kind, list) => (list || []).map(c =>
+    ({ kind:kind, x:c.x, a:c.a, b:c.b, dir:1, y:GY, alive:true, charge:0, hop:0 }));
+  critters = walker('scorpion', L.scorps)
+    .concat(walker('jerboa', L.jerboas))
+    .concat(walker('caracal', L.caracals))
+    // Owls fly, so they are the one thing not pinned to a surface.
+    .concat((L.owls || []).map(o =>
+      ({ kind:'owl', x:o.x, a:o.a, b:o.b, y:o.y, baseY:o.y, dir:1, alive:true, swoop:0 })));
   pickups = L.dates.map(d => ({ x:d.x, y:d.y, got:false }));
   parts = [];
-  // A scorpion stands on whatever is under it at spawn, and its height never
-  // changes afterwards, so its patrol has to be clamped to that same surface
-  // or it walks off the end and hangs in the air.
-  scorps.forEach(s => {
-    const p = L.plats.find(p => s.x >= p.x && s.x <= p.x + p.w);
-    s.y = p ? p.y : GY;
-    if (p){ s.a = Math.max(s.a, p.x); s.b = Math.min(s.b, p.x + p.w); }
+  // A ground critter stands on whatever is under it at spawn and its height
+  // never changes afterwards, so its patrol has to be clamped to that same
+  // surface or it walks off the end and hangs in the air.
+  critters.forEach(c => {
+    if (c.kind === 'owl') return;
+    const p = L.plats.find(p => c.x >= p.x && c.x <= p.x + p.w);
+    c.y = p ? p.y : GY;
+    if (p){ c.a = Math.max(c.a, p.x); c.b = Math.min(c.b, p.x + p.w); }
     else {
-      const g = L.ground.find(g => s.x >= g[0] && s.x <= g[1]);
-      if (g){ s.a = Math.max(s.a, g[0]); s.b = Math.min(s.b, g[1]); }
+      const g = L.ground.find(g => c.x >= g[0] && c.x <= g[1]);
+      if (g){ c.a = Math.max(c.a, g[0]); c.b = Math.min(c.b, g[1]); }
     }
-    if (s.b < s.a) s.b = s.a;
+    if (c.b < c.a) c.b = c.a;
+    c.home = { a:c.a, b:c.b };
   });
 }
 
@@ -875,20 +952,72 @@ function step(dt){
   for (const s of L.spikes)
     if (fox.y >= GY - 4 && fox.x > s.x - 8 && fox.x < s.x + s.w + 8) hurt(s.x + s.w / 2);
 
-  // scorpions: stomp from above, hurt from the side
-  for (const s of scorps){
-    if (!s.alive) continue;
-    s.x += s.dir * 0.72 * dt;
-    if (s.x < s.a){ s.x = s.a; s.dir = 1; }
-    if (s.x > s.b){ s.x = s.b; s.dir = -1; }
-    const dx = Math.abs(s.x - fox.x), dy = fox.y - s.y;
-    if (dx < 20 && dy > -34 && dy < 10){
-      if (fox.vy > 1.2 && prevY < s.y - 12){
-        s.alive = false; fox.vy = -7.6; fox.buffer = 0;
-        burst(s.x, s.y - 8, '#8C4A3A', 12);
-        runDates += 2; SND.stomp();
-      } else hurt(s.x);
+  // The food web, which runs both ways. A scorpion and a jerboa are dinner; a
+  // caracal and an eagle-owl are the other side of the arrangement entirely.
+  for (const c of critters){
+    if (!c.alive) continue;
+
+    if (c.kind === 'scorpion'){
+      c.x += c.dir * 0.72 * dt;
+      if (c.x < c.a){ c.x = c.a; c.dir = 1; }
+      if (c.x > c.b){ c.x = c.b; c.dir = -1; }
+
+    } else if (c.kind === 'jerboa'){
+      // bolts away when the fox is close, which is the whole point of catching one
+      const near = Math.abs(c.x - fox.x) < 110 && Math.abs(c.y - fox.y) < 50;
+      c.hop += dt * (near ? 0.42 : 0.15);
+      if (near) c.dir = fox.x > c.x ? -1 : 1;
+      c.x += c.dir * (near ? 2.5 : 0.5) * dt;
+      if (c.x < c.a){ c.x = c.a; c.dir = 1; }
+      if (c.x > c.b){ c.x = c.b; c.dir = -1; }
+
+    } else if (c.kind === 'caracal'){
+      // patrols, then charges once it has seen you. Too big to pounce on.
+      const sees = Math.abs(c.x - fox.x) < 190 && Math.abs(c.y - fox.y) < 60;
+      if (sees) c.charge = Math.min(c.charge + dt * 0.04, 1);
+      else c.charge = Math.max(c.charge - dt * 0.02, 0);
+      if (c.charge > 0.5) c.dir = fox.x > c.x ? 1 : -1;
+      c.x += c.dir * (0.8 + c.charge * 1.9) * dt;
+      // a charging caracal will leave its patrol, but not its ledge
+      const lo = c.charge > 0.5 ? c.home.a - 40 : c.a;
+      const hi = c.charge > 0.5 ? c.home.b + 40 : c.b;
+      if (c.x < lo){ c.x = lo; c.dir = 1; }
+      if (c.x > hi){ c.x = hi; c.dir = -1; }
+
+    } else if (c.kind === 'owl'){
+      // quarters its stretch, then stoops. Owls take pups out of the open.
+      c.x += c.dir * 1.15 * dt;
+      if (c.x < c.a){ c.x = c.a; c.dir = 1; }
+      if (c.x > c.b){ c.x = c.b; c.dir = -1; }
+      const over = Math.abs(c.x - fox.x) < 150;
+      c.swoop += dt * (over ? 0.05 : -0.04);
+      c.swoop = Math.max(0, Math.min(1, c.swoop));
+      c.y = c.baseY + c.swoop * (fox.y - 34 - c.baseY) + Math.sin(t / 22) * 4;
+      if (over && c.swoop > 0.1) c.dir = fox.x > c.x ? 1 : -1;
     }
+
+    const dx = Math.abs(c.x - fox.x), dy = fox.y - c.y;
+    const prey = c.kind === 'scorpion' || c.kind === 'jerboa';
+    if (dx < (c.kind === 'owl' ? 22 : 20) && dy > -38 && dy < (c.kind === 'owl' ? 30 : 10)){
+      if (!prey){
+        hurt(c.x);                                   // predators hurt from any side
+      } else if (c.kind === 'jerboa' || (fox.vy > 1.2 && prevY < c.y - 12)){
+        // caught: a pounce for the scorpion, a straight run-down for the jerboa
+        c.alive = false;
+        if (c.kind === 'scorpion'){ fox.vy = -7.6; fox.buffer = 0; }
+        burst(c.x, c.y - 8, c.kind === 'scorpion' ? '#8C4A3A' : '#D9B88A', 12);
+        runDates += c.kind === 'scorpion' ? 2 : 3;
+        fox.charge += c.kind === 'scorpion' ? 2 : 3;
+        while (fox.charge >= DATES_PER_BOUND){
+          fox.charge -= DATES_PER_BOUND;
+          if (fox.bounds < MAX_BOUNDS) fox.bounds++;
+        }
+        SND.stomp(); met(c.kind);
+      } else {
+        hurt(c.x);                                   // a scorpion still stings
+      }
+    }
+    if (dx < 230) met(c.kind);
   }
 
   // dates: score, and the charge that buys a Bound
@@ -898,6 +1027,7 @@ function step(dt){
       p.got = true; dates++; runDates++;
       burst(p.x, p.y, '#E8A563', 6);
       SND.date();
+      met('date');
       if (++fox.charge >= DATES_PER_BOUND){
         fox.charge = 0;
         if (fox.bounds < MAX_BOUNDS){ fox.bounds++; burst(fox.x, fox.y - 30, '#F6CFC6', 12); }
@@ -910,6 +1040,7 @@ function step(dt){
     if (m.got) continue;
     if (Math.abs(m.x - fox.x) < 22 && Math.abs(m.y - (fox.y - 26)) < 28){
       m.got = true; burst(m.x, m.y, '#8FC96F', 14); SND.melon();
+      met('melon');
       if (fox.hearts < 3) fox.hearts++; else runDates += 5;
     }
   }
@@ -919,6 +1050,7 @@ function step(dt){
     if (f.got) continue;
     if (Math.abs(f.x - fox.x) < 22 && Math.abs(f.y - (fox.y - 26)) < 28){
       f.got = true; fox.dashReady = Math.min(fox.dashReady + 1, 2);
+      met('flower');
       burst(f.x, f.y, '#CFE8FF', 14); SND.flower();
     }
   }
@@ -1031,6 +1163,114 @@ function drawDate(p, i){
   x.beginPath(); x.ellipse(-1.8, -3, 1.3, 2, -.4, 0, 7); x.fill();
   x.strokeStyle = '#6B5231'; x.lineWidth = 1.4; x.lineCap = 'round';
   x.beginPath(); x.moveTo(0, -7.6); x.lineTo(1.6, -10.4); x.stroke();
+  x.restore();
+}
+
+function drawJerboa(c){
+  // Long back legs, long tail with a tufted tip. It hops.
+  const bob = Math.abs(Math.sin(c.hop)) * 5;
+  x.save(); x.translate(c.x - cam, c.y - bob); x.scale(c.dir, 1);
+  x.lineJoin = 'round'; x.lineCap = 'round';
+  x.strokeStyle = '#8A6338'; x.lineWidth = 2;
+  // tail
+  x.strokeStyle = '#C9A471'; x.lineWidth = 3;
+  x.beginPath(); x.moveTo(-6, -8); x.quadraticCurveTo(-20, -10, -22, -20); x.stroke();
+  x.fillStyle = '#FBF0DE';
+  x.beginPath(); x.ellipse(-22, -22, 3, 4.4, 0, 0, 7); x.fill();
+  // back leg, folded and long
+  x.fillStyle = '#C9A471'; x.strokeStyle = '#8A6338'; x.lineWidth = 1.8;
+  x.beginPath(); x.moveTo(-4, -9); x.lineTo(-7, -2); x.lineTo(1, 0); x.stroke();
+  // body and head
+  x.fillStyle = '#D9B88A';
+  x.beginPath(); x.ellipse(0, -9, 7.5, 6, 0, 0, 7); x.fill(); x.stroke();
+  x.beginPath(); x.ellipse(7, -13, 4.4, 4, 0, 0, 7); x.fill(); x.stroke();
+  // ears
+  x.beginPath(); x.ellipse(6, -18.5, 1.8, 3.4, -.2, 0, 7); x.fill(); x.stroke();
+  x.beginPath(); x.ellipse(9.4, -18, 1.8, 3.4, .1, 0, 7); x.fill(); x.stroke();
+  x.fillStyle = '#2E2622';
+  x.beginPath(); x.arc(9, -13.4, 1.4, 0, 7); x.fill();
+  x.restore();
+}
+
+function drawCaracal(c){
+  // The tufted ears are the tell, so they get drawn big.
+  const stalk = c.charge > 0.5;
+  const step2 = Math.sin(t / (stalk ? 5 : 11) + c.x) * 3;
+  x.save(); x.translate(c.x - cam, c.y); x.scale(c.dir, 1);
+  x.lineJoin = 'round'; x.lineCap = 'round';
+  const COAT = '#C98A52', EDGE = '#6B4524';
+  x.strokeStyle = EDGE; x.lineWidth = 2;
+  // legs
+  x.strokeStyle = COAT; x.lineWidth = 5;
+  for (const [lx, ph] of [[-9, 1], [8, -1]]){
+    x.beginPath(); x.moveTo(lx, -13); x.lineTo(lx + ph * step2, -1); x.stroke();
+  }
+  x.strokeStyle = '#B07A45'; x.lineWidth = 4.5;
+  for (const [lx, ph] of [[-6, -1], [11, 1]]){
+    x.beginPath(); x.moveTo(lx, -13); x.lineTo(lx + ph * step2, -1); x.stroke();
+  }
+  // tail
+  x.strokeStyle = COAT; x.lineWidth = 4;
+  x.beginPath(); x.moveTo(-13, -17); x.quadraticCurveTo(-24, -15, -25, -25); x.stroke();
+  // body
+  x.fillStyle = COAT; x.strokeStyle = EDGE; x.lineWidth = 2;
+  x.beginPath(); x.ellipse(0, -18, 15, 9, 0, 0, 7); x.fill(); x.stroke();
+  // head
+  x.beginPath(); x.ellipse(14, -24, 7.5, 6.5, 0, 0, 7); x.fill(); x.stroke();
+  // ears with the black tufts
+  for (const ex of [10.5, 17]){
+    x.beginPath(); x.moveTo(ex - 2.5, -29); x.lineTo(ex, -38); x.lineTo(ex + 3, -29);
+    x.closePath(); x.fillStyle = COAT; x.fill(); x.stroke();
+    x.strokeStyle = '#2E2622'; x.lineWidth = 1.8;
+    x.beginPath(); x.moveTo(ex, -37); x.lineTo(ex + 0.6, -43); x.stroke();
+    x.strokeStyle = EDGE; x.lineWidth = 2;
+  }
+  x.fillStyle = '#FBF0DE';
+  x.beginPath(); x.ellipse(18, -21.5, 3.6, 3, 0, 0, 7); x.fill();
+  x.fillStyle = stalk ? '#E8A563' : '#F3D98A';
+  x.beginPath(); x.ellipse(16.5, -26, 2.1, 2.4, 0, 0, 7); x.fill();
+  x.fillStyle = '#2E2622';
+  x.beginPath(); x.ellipse(16.5, -26, 0.9, 2.2, 0, 0, 7); x.fill();
+  x.beginPath(); x.arc(20.5, -21, 1.5, 0, 7); x.fill();
+  x.restore();
+}
+
+function drawOwl(c){
+  const flap = Math.sin(t / 6) * (c.swoop > 0.15 ? 0.25 : 0.6);
+  x.save(); x.translate(c.x - cam, c.y); x.scale(c.dir, 1);
+  x.lineJoin = 'round';
+  const F = '#A98B63', E = '#4A3827';
+  x.strokeStyle = E; x.lineWidth = 2;
+  for (const sgn of [-1, 1]){
+    x.save(); x.rotate(sgn * flap);
+    x.fillStyle = sgn < 0 ? '#8E7352' : F;
+    x.beginPath();
+    x.moveTo(0, -6);
+    x.quadraticCurveTo(-16 * sgn, -16, -30 * sgn, -4);
+    x.quadraticCurveTo(-16 * sgn, -2, 0, 2);
+    x.closePath(); x.fill(); x.stroke();
+    x.restore();
+  }
+  x.fillStyle = F;
+  x.beginPath(); x.ellipse(0, -2, 9, 11, 0, 0, 7); x.fill(); x.stroke();
+  x.fillStyle = '#C6AA82';
+  x.beginPath(); x.ellipse(1, 2, 6, 7, 0, 0, 7); x.fill();
+  // head, with the ear tufts a Pharaoh eagle-owl is known for
+  x.fillStyle = F;
+  x.beginPath(); x.ellipse(2, -13, 8, 7, 0, 0, 7); x.fill(); x.stroke();
+  for (const ex of [-3, 7]){
+    x.beginPath(); x.moveTo(ex - 2, -18); x.lineTo(ex + (ex < 0 ? -2 : 2), -25);
+    x.lineTo(ex + 3, -18); x.closePath(); x.fill(); x.stroke();
+  }
+  x.fillStyle = '#FFCB45';
+  x.beginPath(); x.arc(-0.5, -14, 3.1, 0, 7); x.fill();
+  x.beginPath(); x.arc(6.5, -14, 3.1, 0, 7); x.fill();
+  x.fillStyle = '#2E2622';
+  x.beginPath(); x.arc(-0.5, -14, 1.5, 0, 7); x.fill();
+  x.beginPath(); x.arc(6.5, -14, 1.5, 0, 7); x.fill();
+  x.fillStyle = '#5A4630';
+  x.beginPath(); x.moveTo(3, -12); x.lineTo(5.4, -8.5); x.lineTo(0.8, -8.5);
+  x.closePath(); x.fill();
   x.restore();
 }
 
@@ -1180,7 +1420,13 @@ function render(){
   pickups.forEach(drawDate);
   melons.forEach(drawMelon);
   flowers.forEach(drawFlower);
-  scorps.forEach(s => { if (s.alive) drawScorpion(s); });
+  for (const c of critters){
+    if (!c.alive) continue;
+    if (c.kind === 'scorpion') drawScorpion(c);
+    else if (c.kind === 'jerboa') drawJerboa(c);
+    else if (c.kind === 'caracal') drawCaracal(c);
+    else if (c.kind === 'owl') drawOwl(c);
+  }
 
   for (const p of parts){
     if (p.life <= 0) continue;
@@ -1207,6 +1453,7 @@ function render(){
    Cards, score, flow
    ============================================================ */
 const card = document.getElementById('card'), inner = document.getElementById('inner');
+const elNote = document.getElementById('note');
 const elHearts = document.getElementById('hearts'), elDates = document.getElementById('dates'),
       elLvl = document.getElementById('lvl');
 
@@ -1225,6 +1472,9 @@ function hud(){
   let k = '◆'.repeat(fox.bounds) + '◇'.repeat(Math.max(0, MAX_BOUNDS - fox.bounds));
   if (fox.dashReady > 0) k += '  ⇢'.repeat(fox.dashReady);
   elKit.textContent = k;
+  if (noteUntil && performance.now() > noteUntil){
+    elNote.classList.remove('on'); noteUntil = 0;
+  }
   document.body.classList.toggle('candash', fox.dashReady > 0);
 }
 
@@ -1260,9 +1510,9 @@ function titleCard(){
   state = 'title';
   showCard(
     '<h1>Fennec</h1>' +
-    '<p class="lead">' + (hostName ? hostName + ', the ' : 'The ') +
-      'dates are scattered across three stretches of desert and the den is at the far end ' +
-      'of each. Scorpions can be jumped on. Spines cannot.</p>' +
+    '<p class="lead">' + (hostName ? hostName + ', three ' : 'Three ') +
+      'stretches of real Sahara, with the den at the far end of each. Everything in ' +
+      'here either eats a fennec or gets eaten by one.</p>' +
     '<div class="keys">' +
       '<div><b>Run</b><span>Arrow keys, A / D, or the pads</span></div>' +
       '<div><b>Jump</b><span>Space, Up, or JUMP</span></div>' +
@@ -1271,7 +1521,8 @@ function titleCard(){
         'used in the air</span></div>' +
       '<div><b>Dash</b><span>A moonflower gives you one. Shift, X, or DASH</span></div>' +
       '<div><b>Melon</b><span>Water, and a heart back. Never anywhere safe</span></div>' +
-      '<div><b>Scorpions</b><span>Land on one, worth 2 dates</span></div>' +
+      '<div><b>Hunting</b><span>Scorpions and jerboas are food. Pounce on them</span></div>' +
+      '<div><b>Hunted</b><span>Caracals and eagle-owls eat fennecs. Too big to pounce on</span></div>' +
       '<div><b>Hearts</b><span>Three, and a pit takes the lot</span></div>' +
       '<div><b>Sound</b><span>M, or the note in the corner</span></div>' +
     '</div>' +
@@ -1311,6 +1562,8 @@ function finalCard(){
     '<p class="lead">Three stretches of desert, and the fennec is in the den with the lot.</p>' +
     '<div class="tally"><span>Dates on the last run</span><b>' + dates + '</b></div>' +
     '<div class="tally tot"><span>Final score</span><b>' + total + '</b></div>' +
+    '<p style="margin-top:14px;font-size:13px">Met along the way: ' +
+      (Object.keys(seen).map(k => GUIDE[k][0]).join(', ') || 'nothing at all') + '.</p>' +
     '<button class="go" id="post">Post the score to the chat</button>' +
     '<button class="go ghost" id="retry">Run it again from the start</button>' +
     '<div class="sent" id="sent"></div>');
@@ -1636,7 +1889,9 @@ let last = performance.now(), frames = 0, lastDt = 0;
 // exposed only so the test harness can drive a run; harmless in play
 window.__g = { fox: fox, get state(){ return state; }, get lv(){ return lv; },
                get dates(){ return dates; }, get total(){ return total; },
-               scorps: () => scorps, pickups: () => pickups, levels: LEVELS,
+               critters: () => critters, guide: () => GUIDE,
+               scorps: () => critters.filter(c => c.kind === 'scorpion'),
+               pickups: () => pickups, levels: LEVELS,
                advance: advance,
                get t(){ return t; }, get frames(){ return frames; },
                get view(){ return { VW:VW, VH:VH, yOff:yOff, scale:scale }; },

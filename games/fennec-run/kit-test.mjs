@@ -205,6 +205,77 @@ const assistBites = await p.evaluate(() => {
 check('a platform needing an assist is still flagged', assistBites > 0,
       assistBites + ' reported');
 
+
+/* ---------------- the food web ---------------- */
+const web = await p.evaluate(async () => {
+  const frame = () => new Promise(r => requestAnimationFrame(r));
+  const out = {};
+  const place = async (kind, above) => {
+    __g.goto(2);                                     // Night Run has all four
+    const c = __g.critters().find(k => k.kind === kind);
+    if (!c) return null;
+    __g.fox.hearts = 3; __g.fox.inv = 0; __g.fox.bounds = 0; __g.fox.charge = 0;
+    if (above){ __g.fox.x = c.x; __g.fox.y = c.y - 46; __g.fox.vy = 5; __g.fox.onGround = false; }
+    else { __g.fox.x = c.x - 12; __g.fox.y = c.y; __g.fox.vy = 0; __g.fox.onGround = true; }
+    for (let i = 0; i < 30; i++) await frame();
+    return { alive: c.alive, hearts: __g.fox.hearts, bounds: __g.fox.bounds };
+  };
+  out.scorpionPounced = await place('scorpion', true);
+  out.scorpionSide    = await place('scorpion', false);
+  out.jerboa          = await place('jerboa', false);
+  out.caracalPounce   = await place('caracal', true);
+  out.owlPounce       = await place('owl', true);
+  return out;
+});
+check('pouncing on a scorpion catches it', web.scorpionPounced.alive === false &&
+      web.scorpionPounced.hearts === 3, 'hearts ' + web.scorpionPounced.hearts);
+check('a scorpion still stings from the side', web.scorpionSide.hearts < 3,
+      'hearts ' + web.scorpionSide.hearts);
+check('a jerboa is caught by running it down', web.jerboa.alive === false &&
+      web.jerboa.hearts === 3, 'hearts ' + web.jerboa.hearts);
+check('eating prey feeds the Bound meter', web.jerboa.bounds >= 0 &&
+      web.scorpionPounced.bounds >= 0, 'bounds after a catch');
+check('a caracal cannot be pounced on', web.caracalPounce.alive === true &&
+      web.caracalPounce.hearts < 3, 'alive, hearts ' + web.caracalPounce.hearts);
+check('an eagle-owl cannot be pounced on', web.owlPounce.alive === true &&
+      web.owlPounce.hearts < 3, 'alive, hearts ' + web.owlPounce.hearts);
+
+const stalk = await p.evaluate(async () => {
+  __g.goto(2);
+  const c = __g.critters().find(k => k.kind === 'caracal');
+  const calm = c.charge;                       // nothing has seen anything yet
+  // Keep the fox alive and on the caracal's own ledge: park it over a pit and
+  // the run ends, step() returns early, and the caracal never gets a tick.
+  __g.fox.inv = 999; __g.fox.hearts = 3;
+  for (let i = 0; i < 70; i++){
+    __g.fox.x = c.x + 80; __g.fox.y = c.y; __g.fox.vy = 0; __g.fox.onGround = true;
+    await new Promise(r => requestAnimationFrame(r));
+  }
+  return { calm: +calm.toFixed(2), roused: +c.charge.toFixed(2),
+           state: __g.state };
+});
+check('a caracal rouses when it sees you', stalk.roused > stalk.calm,
+      'charge ' + stalk.calm + ' → ' + stalk.roused + ' (state ' + stalk.state + ')');
+
+const guide = await p.evaluate(async () => {
+  __g.goto(0);
+  __g.fox.inv = 999;
+  const c = __g.critters().find(k => k.kind === 'jerboa');
+  __g.fox.x = c.x - 150; __g.fox.y = c.y;
+  for (let i = 0; i < 10; i++) await new Promise(r => requestAnimationFrame(r));
+  const n = document.getElementById('note');
+  return { shown: n.classList.contains('on'), text: n.textContent.slice(0, 60) };
+});
+check('meeting a species shows its field note', guide.shown, guide.text.trim());
+
+const facts = await p.evaluate(() => {
+  const g = __g.guide();
+  return Object.keys(g).filter(k => !g[k][1] || g[k][1].length < 30);
+});
+check('every species in the guide carries a fact', facts.length === 0,
+      facts.join(', ') || Object.keys(await p.evaluate(() => __g.guide())).length + ' entries');
+
+
 await p.screenshot({ path: 'games/fennec-run/kit.png' });
 await b.close();
 console.log(errs.length ? '\nPAGE ERRORS:\n' + errs.join('\n') : '\nno page errors');

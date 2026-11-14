@@ -185,10 +185,12 @@ const reach = await p.evaluate(() => {
   __g.levels.forEach((L, i) => {
     const onGround = px => L.ground.some(g => px >= g[0] && px <= g[1]);
     if (!onGround(L.den)) out.push('L' + (i+1) + ': den over a pit');
-    L.scorps.forEach((s, j) => {
-      if (!onGround(s.x) && !L.plats.some(p => s.x >= p.x && s.x <= p.x + p.w))
-        out.push('L' + (i+1) + ' scorpion ' + j + ' floats over a pit at x=' + s.x);
-    });
+    // owls fly; everything else has to spawn on something solid
+    for (const kind of ['scorps', 'jerboas', 'caracals'])
+      (L[kind] || []).forEach((s, j) => {
+        if (!onGround(s.x) && !L.plats.some(p => s.x >= p.x && s.x <= p.x + p.w))
+          out.push('L' + (i+1) + ' ' + kind + ' ' + j + ' floats over a pit at x=' + s.x);
+      });
     L.spikes.forEach((s, j) => {
       if (!onGround(s.x)) out.push('L' + (i+1) + ' spike ' + j + ' over a pit at x=' + s.x);
     });
@@ -212,10 +214,10 @@ const floaters = await p.evaluate(() => {
   const out = [];
   __g.levels.forEach((L, i) => {
     __g.goto(i);
-    __g.scorps().forEach((s, j) => {
+    __g.critters().filter(c => c.kind !== 'owl').forEach((s, j) => {
       const onPlat = L.plats.some(p => s.a >= p.x && s.b <= p.x + p.w && Math.abs(s.y - p.y) < 1);
       const onGnd  = L.ground.some(g => s.a >= g[0] && s.b <= g[1]) && s.y === 300;
-      if (!onPlat && !onGnd) out.push('L' + (i+1) + ' scorpion ' + j +
+      if (!onPlat && !onGnd) out.push('L' + (i+1) + ' ' + s.kind + ' ' + j +
         ' patrols ' + Math.round(s.a) + '..' + Math.round(s.b) + ' at y=' + s.y);
     });
   });
