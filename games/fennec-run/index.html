@@ -399,11 +399,11 @@ const SND = (function(){
   // Measured, not guessed: the first version had stages one to three landing
   // within 6% of each other, which is not a build, it is three mixes of the
   // same loudness wearing different hats. Widened until the step is audible.
-  const MIX = [[.12,.09,.00,.00,.00,.00],
-               [.18,.14,.10,.10,.00,.00],
-               [.23,.18,.17,.15,.14,.00],
-               [.27,.22,.31,.17,.18,.00],
-               [.30,.25,.34,.19,.21,.26]];
+  const MIX = [[.07,.09,.00,.00,.00,.00],
+               [.10,.14,.10,.10,.00,.00],
+               [.13,.18,.17,.15,.14,.00],
+               [.16,.22,.31,.17,.18,.00],
+               [.18,.25,.34,.19,.21,.26]];
 
   function mk(){
     if (ac) return true;
@@ -424,17 +424,22 @@ const SND = (function(){
     } catch (e) { ac = null; return false; }
   }
 
+  // The pad is the only layer present on all five stages, so it is the one
+  // that reads as "the music" and the one that gets in the way. Darker, slower
+  // and a triangle under a single saw instead of two saws beating against each
+  // other: a bed to lie under rather than a thing to listen to.
   function pad(t, midi, dur, g){
     const a = ac.createOscillator(), b = ac.createOscillator();
-    const f = ac.createBiquadFilter(), v = ac.createGain();
-    a.type = b.type = 'sawtooth';
-    a.frequency.value = nt(midi); b.frequency.value = nt(midi) * 1.005;
-    f.type = 'lowpass'; f.frequency.value = 820; f.Q.value = 0.7;
+    const f = ac.createBiquadFilter(), hp = ac.createBiquadFilter(), v = ac.createGain();
+    a.type = 'sawtooth'; b.type = 'triangle';
+    a.frequency.value = nt(midi); b.frequency.value = nt(midi) * 1.003;
+    f.type = 'lowpass'; f.frequency.value = 520; f.Q.value = 0.5;
+    hp.type = 'highpass'; hp.frequency.value = 90;    // keep it out of the kick
     v.gain.setValueAtTime(0.0001, t);
-    v.gain.linearRampToValueAtTime(g, t + 0.7);
-    v.gain.setTargetAtTime(0.0001, t + dur * 0.7, 0.35);
-    a.connect(f); b.connect(f); f.connect(v); v.connect(music);
-    a.start(t); b.start(t); a.stop(t + dur + 0.8); b.stop(t + dur + 0.8);
+    v.gain.linearRampToValueAtTime(g, t + 1.1);        // breathes in, never arrives
+    v.gain.setTargetAtTime(0.0001, t + dur * 0.62, 0.45);
+    a.connect(f); b.connect(f); f.connect(hp); hp.connect(v); v.connect(music);
+    a.start(t); b.start(t); a.stop(t + dur + 1.0); b.stop(t + dur + 1.0);
   }
   function pluck(t, midi, g){
     const o = ac.createOscillator(), f = ac.createBiquadFilter(), v = ac.createGain();
