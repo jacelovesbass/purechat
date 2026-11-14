@@ -392,10 +392,15 @@ const SND = (function(){
     {t:40,n:69,d:6},{t:48,n:67,d:4},{t:52,n:69,d:10},{t:64,n:74,d:6},{t:72,n:76,d:4},
     {t:76,n:74,d:8},{t:88,n:72,d:4},{t:92,n:71,d:10},{t:108,n:69,d:6},{t:116,n:65,d:12}
   ];
-  // pad, bass, drum, pluck, lead
-  const MIX = [[.26,.20,.13,.00,.00],
-               [.26,.22,.20,.15,.00],
-               [.28,.24,.22,.17,.17]];
+  // pad, bass, drum, pluck, lead, voice.
+  // Five stages, and the score is the arc: almost nothing at the start, a
+  // frame drum, then the melody, then the drums hardening, and a voice over
+  // the last one. A fennec is out all night and gets home before dawn.
+  const MIX = [[.15,.11,.00,.00,.00,.00],
+               [.19,.15,.08,.09,.00,.00],
+               [.23,.18,.13,.14,.12,.00],
+               [.26,.22,.27,.16,.17,.00],
+               [.28,.24,.30,.17,.19,.22]];
 
   function mk(){
     if (ac) return true;
@@ -457,6 +462,29 @@ const SND = (function(){
     v.gain.setTargetAtTime(0.0001, t + dur * 0.6, 0.12);
     o.connect(v); v.connect(music); o.start(t); o.stop(t + dur + 0.3);
   }
+  // A vowel is a pair of resonances. Two bandpasses over a sawtooth at roughly
+  // 700 and 1150 Hz gives an "ah" that sits behind the lead without competing.
+  function voice(t, midi, dur, g){
+    const o = ac.createOscillator(), out = ac.createGain();
+    const vib = ac.createOscillator(), vibAmt = ac.createGain();
+    o.type = 'sawtooth'; o.frequency.value = nt(midi);
+    vib.frequency.value = 4.7; vibAmt.gain.value = 2.1;
+    vib.connect(vibAmt); vibAmt.connect(o.frequency);
+    const f1 = ac.createBiquadFilter(), f2 = ac.createBiquadFilter();
+    f1.type = f2.type = 'bandpass';
+    f1.frequency.value = 700; f1.Q.value = 7;
+    f2.frequency.value = 1160; f2.Q.value = 9;
+    const g1 = ac.createGain(), g2 = ac.createGain();
+    g1.gain.value = 1; g2.gain.value = 0.55;
+    o.connect(f1); o.connect(f2); f1.connect(g1); f2.connect(g2);
+    g1.connect(out); g2.connect(out);
+    out.gain.setValueAtTime(0.0001, t);
+    out.gain.linearRampToValueAtTime(g, t + 0.45);
+    out.gain.setTargetAtTime(0.0001, t + dur * 0.68, 0.32);
+    out.connect(music);
+    o.start(t); vib.start(t); o.stop(t + dur + 0.8); vib.stop(t + dur + 0.8);
+  }
+
   function skin(t, g, hz, dur, bus){
     const s = ac.createBufferSource(), f = ac.createBiquadFilter(), v = ac.createGain();
     s.buffer = noise;
@@ -469,6 +497,9 @@ const SND = (function(){
 
   // Frame drum: a dull skin on the downbeats, a tighter tap between them.
   const DRUM = [2,0,0,1, 0,0,1,0, 2,0,1,0, 0,1,0,1];
+  // From the fourth stage a low tom doubles it, which is what "stronger" means
+  // here: not louder, another drum.
+  const TOM  = [1,0,0,0, 0,0,1,0, 0,0,0,1, 0,0,1,0];
 
   function bar(step, t){
     const m = MIX[Math.min(level, MIX.length - 1)];
@@ -484,7 +515,12 @@ const SND = (function(){
       const hit = DRUM[inBar];
       if (hit === 2){ skin(t, m[2] * duck, 190, 0.22); bass(t, 38, 0.1, m[2] * duck * .5); }
       else if (hit === 1) skin(t, m[2] * duck * 0.45, 1500, 0.06);
+      if (level >= 3 && TOM[inBar]){
+        skin(t, m[2] * duck * 0.7, 110, 0.3);
+        bass(t, 33, 0.16, m[2] * duck * 0.8);
+      }
     }
+    if (m[5] && step % 32 === 0) voice(t, chord[2], S16 * 30, m[5] * duck);
     if (m[3] && step % 2 === 0){
       const seq = [0, 2, 1, 3, 2, 1];
       pluck(t, chord[seq[(step / 2) % seq.length]] + 12, m[3] * duck * 0.8);
@@ -606,79 +642,153 @@ const row = (x, y, n, gap) => { const a = []; for (let i = 0; i < n; i++) a.push
 
 const LEVELS = [
   {
-    name: 'Dune Steps', w: 2650, den: 2520,
-    sky: ['#8FD8EE', '#FBE7C7'], hillA: '#E8CFA2', hillB: '#D9B885',
-    dirt: '#C98A52', crust: '#E0A96B',
-    ground: [[0, 900], [985, 1700], [1800, 2650]],
-    plats: [ {x:300,y:238,w:120}, {x:480,y:188,w:100}, {x:665,y:238,w:110},
-             {x:1055,y:230,w:140}, {x:1255,y:178,w:110}, {x:1455,y:235,w:120},
-             {x:1880,y:228,w:130}, {x:2085,y:182,w:110}, {x:2265,y:240,w:120} ],
-    melons:  [ {x:942, y:244} ],
-    flowers: [ {x:820, y:258} ],
-    spikes: [ {x:760, w:54} ],
-    scorps:   [ {x:560, a:470, b:690}, {x:1500, a:1420, b:1640} ],
-    jerboas:  [ {x:420, a:300, b:500}, {x:1300, a:1255, b:1365}, {x:2300, a:2265, b:2385} ],
-    caracals: [],
-    owls:     [],
-    dates: [].concat(
-      row(318, 206, 4), row(498, 156, 3), row(690, 206, 3),
-      row(915, 240, 3, 24), row(1075, 198, 4), row(1272, 146, 3),
-      row(1720, 244, 3, 26), row(1900, 196, 4), row(2102, 150, 3), row(2285, 208, 3))
+    name: "Dune Steps", w: 3200, den: 3070,
+    sky: ["#8FD8EE", "#FBE7C7"], hillA: "#E8CFA2", hillB: "#D9B885",
+    dirt: "#C98A52", crust: "#E0A96B",
+    ground: [[0,481], [554,978], [1054,1500], [1575,2140], [2214,2638], [2710,3200]],
+    plats: [ {x:220,y:237,w:119}, {x:646,y:240,w:124}, {x:1120,y:240,w:129}, 
+      {x:1308,y:248,w:112}, {x:1683,y:237,w:121}, {x:1874,y:248,w:126}, {x:2280,y:237,w:126}, 
+      {x:2466,y:248,w:86}, {x:2807,y:248,w:97}, {x:2971,y:248,w:114} ],
+    spikes: [ {x:787,w:60} ],
+    melons: [ {x:1016,y:244}, {x:2674,y:244} ],
+    flowers: [ {x:644,y:258}, {x:2304,y:258} ],
+    scorps: [ {x:280,a:220,b:339}, {x:1364,a:1308,b:1420}, {x:2343,a:2280,b:2406}, 
+      {x:3028,a:2971,b:3085} ],
+    jerboas: [ {x:1185,a:1120,b:1249}, {x:1937,a:1874,b:2000}, {x:2856,a:2807,b:2904} ],
+    caracals: [  ],
+    owls: [  ],
+    dates: [ {x:234,y:205}, {x:260,y:205}, {x:286,y:205}, {x:312,y:205}, {x:660,y:208}, 
+      {x:686,y:208}, {x:712,y:208}, {x:738,y:208}, {x:1134,y:208}, {x:1160,y:208}, 
+      {x:1186,y:208}, {x:1212,y:208}, {x:1322,y:216}, {x:1348,y:216}, {x:1374,y:216}, 
+      {x:1697,y:205}, {x:1723,y:205}, {x:1749,y:205}, {x:1775,y:205}, {x:1888,y:216}, 
+      {x:1914,y:216}, {x:1940,y:216}, {x:1966,y:216}, {x:2294,y:205}, {x:2320,y:205}, 
+      {x:2346,y:205}, {x:2372,y:205}, {x:2480,y:216}, {x:2506,y:216}, {x:2532,y:216}, 
+      {x:2821,y:216}, {x:2847,y:216}, {x:2873,y:216}, {x:2985,y:216}, {x:3011,y:216}, 
+      {x:3037,y:216}, {x:495,y:248}, {x:517,y:248}, {x:539,y:248}, {x:1514,y:248}, 
+      {x:1536,y:248}, {x:1558,y:248}, {x:2652,y:248}, {x:2674,y:248}, {x:2696,y:248} ]
   },
   {
-    name: 'The Wadi', w: 3100, den: 2970,
-    sky: ['#79C6E6', '#F3DDBE'], hillA: '#DDC79C', hillB: '#C9A974',
-    dirt: '#BE7C45', crust: '#D89A5C',
-    ground: [[0, 520], [600, 1090], [1170, 1580], [1660, 2240], [2330, 3100]],
-    plats: [ {x:300,y:228,w:100}, {x:640,y:238,w:90}, {x:800,y:180,w:90},
-             {x:1000,y:210,w:110}, {x:1190,y:175,w:100}, {x:1400,y:238,w:120},
-             {x:1700,y:240,w:100}, {x:1870,y:185,w:100}, {x:2040,y:235,w:110},
-             {x:2380,y:230,w:110}, {x:2560,y:180,w:120}, {x:2760,y:232,w:120} ],
-    melons:  [ {x:1625, y:246}, {x:2285, y:246} ],
-    flowers: [ {x:1000, y:258}, {x:2400, y:196} ],
-    spikes: [ {x:430, w:60}, {x:1460, w:54}, {x:2160, w:60} ],
-    scorps:   [ {x:340, a:300, b:400}, {x:1030, a:1000, b:1110},
-                {x:1920, a:1870, b:1970}, {x:2600, a:2560, b:2680} ],
-    jerboas:  [ {x:700, a:600, b:800}, {x:1450, a:1400, b:1520},
-                {x:2800, a:2760, b:2880} ],
-    caracals: [ {x:900, a:800, b:1050}, {x:2000, a:1900, b:2150} ],
-    owls:     [],
-    dates: [].concat(
-      row(315, 196, 3), row(655, 206, 3), row(818, 148, 3),
-      row(1018, 178, 4), row(1207, 143, 3), row(1418, 206, 4),
-      row(1600, 250, 3, 24), row(1715, 208, 3), row(1888, 153, 4),
-      row(2058, 203, 4), row(2255, 248, 3, 24), row(2398, 198, 3),
-      row(2578, 148, 4), row(2778, 200, 3))
+    name: "The Wadi", w: 3600, den: 3470,
+    sky: ["#79C6E6", "#F3DDBE"], hillA: "#DDC79C", hillB: "#C9A974",
+    dirt: "#BE7C45", crust: "#D89A5C",
+    ground: [[0,442], [522,934], [1012,1472], [1545,1972], [2044,2496], [2570,3072], 
+      [3155,3600]],
+    plats: [ {x:220,y:248,w:103}, {x:583,y:240,w:82}, {x:732,y:248,w:107}, 
+      {x:1131,y:236,w:85}, {x:1276,y:248,w:83}, {x:1659,y:237,w:103}, {x:2155,y:246,w:95}, 
+      {x:2319,y:248,w:89}, {x:2642,y:241,w:85}, {x:2797,y:248,w:119}, {x:3273,y:236,w:117} ],
+    spikes: [ {x:749,w:52}, {x:1265,w:51} ],
+    melons: [ {x:973,y:244}, {x:2533,y:244} ],
+    flowers: [ {x:612,y:258}, {x:2660,y:258} ],
+    scorps: [ {x:272,a:220,b:323}, {x:1174,a:1131,b:1216}, {x:2203,a:2155,b:2250}, 
+      {x:2857,a:2797,b:2916} ],
+    jerboas: [ {x:786,a:732,b:839}, {x:1711,a:1659,b:1762}, {x:2685,a:2642,b:2727} ],
+    caracals: [ {x:728,a:562,b:894}, {x:2821,a:2610,b:3032} ],
+    owls: [  ],
+    dates: [ {x:234,y:216}, {x:260,y:216}, {x:286,y:216}, {x:597,y:208}, {x:623,y:208}, 
+      {x:746,y:216}, {x:772,y:216}, {x:798,y:216}, {x:1145,y:204}, {x:1171,y:204}, 
+      {x:1197,y:204}, {x:1290,y:216}, {x:1316,y:216}, {x:1673,y:205}, {x:1699,y:205}, 
+      {x:1725,y:205}, {x:2169,y:214}, {x:2195,y:214}, {x:2221,y:214}, {x:2333,y:216}, 
+      {x:2359,y:216}, {x:2385,y:216}, {x:2656,y:209}, {x:2682,y:209}, {x:2708,y:209}, 
+      {x:2811,y:216}, {x:2837,y:216}, {x:2863,y:216}, {x:2889,y:216}, {x:3287,y:204}, 
+      {x:3313,y:204}, {x:3339,y:204}, {x:456,y:248}, {x:478,y:248}, {x:500,y:248}, 
+      {x:1486,y:248}, {x:1508,y:248}, {x:1530,y:248}, {x:2510,y:248}, {x:2532,y:248}, 
+      {x:2554,y:248} ]
   },
   {
-    name: 'Night Run', w: 3500, den: 3380,
-    sky: ['#2E3F66', '#6E5B86'], hillA: '#4A4166', hillB: '#372F4F',
-    dirt: '#4A3A52', crust: '#6B5570', night: true,
-    ground: [[0, 480], [570, 980], [1070, 1420], [1510, 1900], [1990, 2520], [2610, 3500]],
-    plats: [ {x:250,y:238,w:90}, {x:600,y:232,w:80}, {x:750,y:178,w:80},
-             {x:940,y:232,w:90}, {x:1100,y:186,w:90}, {x:1290,y:238,w:90},
-             {x:1460,y:184,w:85}, {x:1620,y:236,w:90}, {x:1800,y:186,w:90},
-             {x:1960,y:236,w:95}, {x:2120,y:182,w:95}, {x:2330,y:234,w:100},
-             {x:2560,y:186,w:100}, {x:2740,y:236,w:100}, {x:2910,y:182,w:100},
-             {x:3140,y:238,w:110} ],
-    melons:  [ {x:1025, y:244}, {x:2565, y:244} ],
-    flowers: [ {x:700, y:258}, {x:2000, y:258} ],
-    spikes: [ {x:360, w:54}, {x:1180, w:54}, {x:1700, w:60}, {x:2220, w:60}, {x:3020, w:54} ],
-    scorps:   [ {x:290, a:250, b:340}, {x:980, a:940, b:1030},
-                {x:1660, a:1620, b:1710}, {x:2160, a:2120, b:2215},
-                {x:2790, a:2740, b:2840}, {x:3180, a:3140, b:3250} ],
-    jerboas:  [ {x:800, a:750, b:830}, {x:1340, a:1290, b:1380},
-                {x:2380, a:2330, b:2430}, {x:3200, a:3140, b:3250} ],
-    caracals: [ {x:650, a:570, b:900}, {x:1750, a:1600, b:1880},
-                {x:2300, a:2100, b:2450} ],
-    owls:     [ {x:1150, y:120, a:1070, b:1420},
-                {x:2700, y:110, a:2610, b:3000} ],
-    dates: [].concat(
-      row(262, 206, 3), row(615, 200, 3), row(765, 146, 3), row(955, 200, 3),
-      row(1115, 154, 3), row(1305, 206, 3), row(1472, 152, 3), row(1635, 204, 3),
-      row(1815, 154, 3), row(1975, 204, 3), row(2135, 150, 3), row(2345, 202, 3),
-      row(2450, 250, 4, 24), row(2575, 154, 3), row(2755, 204, 3),
-      row(2925, 150, 3), row(3155, 206, 4))
+    name: "The Erg", w: 4000, den: 3870,
+    sky: ["#5E6FA8", "#F0A978"], hillA: "#C89A86", hillB: "#A8807A",
+    dirt: "#9A5F46", crust: "#B87B56",
+    ground: [[0,421], [508,922], [998,1479], [1564,2052], [2136,2622], [2696,3136], 
+      [3209,3682], [3764,4000]],
+    plats: [ {x:220,y:245,w:114}, {x:619,y:245,w:98}, {x:787,y:202,w:86}, 
+      {x:1104,y:243,w:125}, {x:1288,y:191,w:112}, {x:1683,y:239,w:111}, {x:1871,y:188,w:93}, 
+      {x:2203,y:237,w:106}, {x:2379,y:197,w:118}, {x:2790,y:237,w:120}, {x:2970,y:248,w:86}, 
+      {x:3275,y:246,w:103}, {x:3442,y:248,w:80}, {x:3829,y:247,w:87} ],
+    spikes: [ {x:736,w:57}, {x:1263,w:60}, {x:1832,w:53} ],
+    melons: [ {x:960,y:244}, {x:2659,y:244} ],
+    flowers: [ {x:598,y:258}, {x:3299,y:258} ],
+    scorps: [ {x:277,a:220,b:334}, {x:1167,a:1104,b:1229}, {x:1918,a:1871,b:1964}, 
+      {x:2850,a:2790,b:2910}, {x:3482,a:3442,b:3522} ],
+    jerboas: [ {x:830,a:787,b:873}, {x:1739,a:1683,b:1794}, {x:2438,a:2379,b:2497}, 
+      {x:3327,a:3275,b:3378} ],
+    caracals: [ {x:715,a:548,b:882}, {x:2916,a:2736,b:3096} ],
+    owls: [  ],
+    dates: [ {x:234,y:213}, {x:260,y:213}, {x:286,y:213}, {x:633,y:213}, {x:659,y:213}, 
+      {x:685,y:213}, {x:801,y:170}, {x:827,y:170}, {x:853,y:170}, {x:1118,y:211}, 
+      {x:1144,y:211}, {x:1170,y:211}, {x:1196,y:211}, {x:1302,y:159}, {x:1328,y:159}, 
+      {x:1354,y:159}, {x:1697,y:207}, {x:1723,y:207}, {x:1749,y:207}, {x:1885,y:156}, 
+      {x:1911,y:156}, {x:1937,y:156}, {x:2217,y:205}, {x:2243,y:205}, {x:2269,y:205}, 
+      {x:2393,y:165}, {x:2419,y:165}, {x:2445,y:165}, {x:2804,y:205}, {x:2830,y:205}, 
+      {x:2856,y:205}, {x:2882,y:205}, {x:2984,y:216}, {x:3010,y:216}, {x:3036,y:216}, 
+      {x:3289,y:214}, {x:3315,y:214}, {x:3341,y:214}, {x:3456,y:216}, {x:3482,y:216}, 
+      {x:3843,y:215}, {x:3869,y:215}, {x:3895,y:215}, {x:435,y:248}, {x:457,y:248}, 
+      {x:479,y:248}, {x:1493,y:248}, {x:1515,y:248}, {x:1537,y:248}, {x:2636,y:248}, 
+      {x:2658,y:248}, {x:2680,y:248}, {x:3696,y:248}, {x:3718,y:248}, {x:3740,y:248} ]
+  },
+  {
+    name: "Hamada", w: 4400, den: 4270,
+    sky: ["#2B3A5C", "#5A6A92"], hillA: "#4C5578", hillB: "#3A4260",
+    dirt: "#44415A", crust: "#625E7C", night: true,
+    ground: [[0,419], [498,950], [1026,1497], [1578,2032], [2110,2559], [2647,3048], 
+      [3126,3487], [3563,3971], [4057,4400]],
+    plats: [ {x:220,y:238,w:113}, {x:596,y:239,w:127}, {x:792,y:248,w:94}, 
+      {x:1095,y:248,w:116}, {x:1280,y:196,w:105}, {x:1647,y:238,w:125}, {x:1834,y:186,w:99}, 
+      {x:2225,y:245,w:113}, {x:2400,y:248,w:117}, {x:2761,y:245,w:126}, {x:3203,y:236,w:85}, 
+      {x:3355,y:183,w:100}, {x:3633,y:238,w:89}, {x:3783,y:248,w:118}, {x:4168,y:242,w:106} ],
+    spikes: [ {x:747,w:62}, {x:1285,w:59}, {x:1828,w:62}, {x:2357,w:51} ],
+    melons: [ {x:988,y:244}, {x:2603,y:244} ],
+    flowers: [ {x:588,y:258}, {x:3653,y:258} ],
+    scorps: [ {x:277,a:220,b:333}, {x:1153,a:1095,b:1211}, {x:1884,a:1834,b:1933}, 
+      {x:2824,a:2761,b:2887}, {x:3678,a:3633,b:3722} ],
+    jerboas: [ {x:839,a:792,b:886}, {x:1710,a:1647,b:1772}, {x:2459,a:2400,b:2517}, 
+      {x:3405,a:3355,b:3455}, {x:4221,a:4168,b:4274} ],
+    caracals: [ {x:724,a:538,b:910}, {x:2335,a:2150,b:2519}, {x:3767,a:3603,b:3931} ],
+    owls: [ {x:1086,y:100,a:1026,b:1697}, {x:2170,y:114,a:2110,b:2759} ],
+    dates: [ {x:234,y:206}, {x:260,y:206}, {x:286,y:206}, {x:610,y:207}, {x:636,y:207}, 
+      {x:662,y:207}, {x:688,y:207}, {x:806,y:216}, {x:832,y:216}, {x:858,y:216}, 
+      {x:1109,y:216}, {x:1135,y:216}, {x:1161,y:216}, {x:1294,y:164}, {x:1320,y:164}, 
+      {x:1346,y:164}, {x:1661,y:206}, {x:1687,y:206}, {x:1713,y:206}, {x:1739,y:206}, 
+      {x:1848,y:154}, {x:1874,y:154}, {x:1900,y:154}, {x:2239,y:213}, {x:2265,y:213}, 
+      {x:2291,y:213}, {x:2414,y:216}, {x:2440,y:216}, {x:2466,y:216}, {x:2775,y:213}, 
+      {x:2801,y:213}, {x:2827,y:213}, {x:2853,y:213}, {x:3217,y:204}, {x:3243,y:204}, 
+      {x:3269,y:204}, {x:3369,y:151}, {x:3395,y:151}, {x:3421,y:151}, {x:3647,y:206}, 
+      {x:3673,y:206}, {x:3699,y:206}, {x:3797,y:216}, {x:3823,y:216}, {x:3849,y:216}, 
+      {x:4182,y:210}, {x:4208,y:210}, {x:4234,y:210}, {x:433,y:248}, {x:455,y:248}, 
+      {x:477,y:248}, {x:1511,y:248}, {x:1533,y:248}, {x:1555,y:248}, {x:2573,y:248}, 
+      {x:2595,y:248}, {x:2617,y:248}, {x:3501,y:248}, {x:3523,y:248}, {x:3545,y:248} ]
+  },
+  {
+    name: "Before Dawn", w: 4800, den: 4670,
+    sky: ["#241E42", "#7C5E86"], hillA: "#463A66", hillB: "#332A50",
+    dirt: "#463654", crust: "#655074", night: true,
+    ground: [[0,394], [473,897], [984,1365], [1453,1912], [1999,2406], [2492,2837], 
+      [2919,3243], [3331,3710], [3798,4184], [4272,4672], [4752,4800]],
+    plats: [ {x:220,y:243,w:129}, {x:544,y:236,w:123}, {x:725,y:248,w:81}, 
+      {x:1086,y:239,w:81}, {x:1242,y:199,w:87}, {x:1539,y:241,w:121}, {x:1728,y:248,w:81}, 
+      {x:2063,y:247,w:123}, {x:2587,y:243,w:124}, {x:3027,y:246,w:103}, {x:3434,y:236,w:106}, 
+      {x:3912,y:239,w:103}, {x:4376,y:243,w:118} ],
+    spikes: [ {x:706,w:59}, {x:1194,w:52}, {x:1705,w:59}, {x:2223,w:62} ],
+    melons: [ {x:941,y:244}, {x:2449,y:244} ],
+    flowers: [ {x:563,y:258}, {x:4362,y:258} ],
+    scorps: [ {x:285,a:220,b:349}, {x:1127,a:1086,b:1167}, {x:1769,a:1728,b:1809}, 
+      {x:3079,a:3027,b:3130}, {x:4435,a:4376,b:4494} ],
+    jerboas: [ {x:766,a:725,b:806}, {x:1600,a:1539,b:1660}, {x:2649,a:2587,b:2711}, 
+      {x:3964,a:3912,b:4015} ],
+    caracals: [ {x:685,a:513,b:857}, {x:2665,a:2532,b:2797}, {x:3991,a:3838,b:4144} ],
+    owls: [ {x:1044,y:100,a:984,b:1565}, {x:2059,y:114,a:1999,b:2606}, 
+      {x:2979,y:128,a:2919,b:3443} ],
+    dates: [ {x:234,y:211}, {x:260,y:211}, {x:286,y:211}, {x:312,y:211}, {x:558,y:204}, 
+      {x:584,y:204}, {x:610,y:204}, {x:636,y:204}, {x:739,y:216}, {x:765,y:216}, 
+      {x:1100,y:207}, {x:1126,y:207}, {x:1256,y:167}, {x:1282,y:167}, {x:1308,y:167}, 
+      {x:1553,y:209}, {x:1579,y:209}, {x:1605,y:209}, {x:1631,y:209}, {x:1742,y:216}, 
+      {x:1768,y:216}, {x:2077,y:215}, {x:2103,y:215}, {x:2129,y:215}, {x:2155,y:215}, 
+      {x:2601,y:211}, {x:2627,y:211}, {x:2653,y:211}, {x:2679,y:211}, {x:3041,y:214}, 
+      {x:3067,y:214}, {x:3093,y:214}, {x:3448,y:204}, {x:3474,y:204}, {x:3500,y:204}, 
+      {x:3926,y:207}, {x:3952,y:207}, {x:3978,y:207}, {x:4390,y:211}, {x:4416,y:211}, 
+      {x:4442,y:211}, {x:408,y:248}, {x:430,y:248}, {x:452,y:248}, {x:1379,y:248}, 
+      {x:1401,y:248}, {x:1423,y:248}, {x:2420,y:248}, {x:2442,y:248}, {x:2464,y:248}, 
+      {x:3257,y:248}, {x:3279,y:248}, {x:3301,y:248}, {x:4198,y:248}, {x:4220,y:248}, 
+      {x:4242,y:248} ]
   }
 ];
 
@@ -752,6 +862,14 @@ function loadLevel(i){
     }
     if (c.b < c.a) c.b = c.a;
     c.home = { a:c.a, b:c.b };
+    // The ledge it is standing on, which is a harder limit than its patrol: a
+    // charging animal may leave the patrol but its height never changes, so
+    // leaving the surface means hanging in the air.
+    c.surf = p ? { a:p.x, b:p.x + p.w }
+               : (function(){
+                   const g = L.ground.find(g => c.x >= g[0] && c.x <= g[1]);
+                   return g ? { a:g[0], b:g[1] } : { a:c.a, b:c.b };
+                 })();
   });
 }
 
@@ -978,9 +1096,9 @@ function step(dt){
       else c.charge = Math.max(c.charge - dt * 0.02, 0);
       if (c.charge > 0.5) c.dir = fox.x > c.x ? 1 : -1;
       c.x += c.dir * (0.8 + c.charge * 1.9) * dt;
-      // a charging caracal will leave its patrol, but not its ledge
-      const lo = c.charge > 0.5 ? c.home.a - 40 : c.a;
-      const hi = c.charge > 0.5 ? c.home.b + 40 : c.b;
+      // a charging caracal will leave its patrol, but never its ledge
+      const lo = c.charge > 0.5 ? Math.max(c.surf.a, c.home.a - 60) : c.a;
+      const hi = c.charge > 0.5 ? Math.min(c.surf.b, c.home.b + 60) : c.b;
       if (c.x < lo){ c.x = lo; c.dir = 1; }
       if (c.x > hi){ c.x = hi; c.dir = -1; }
 
@@ -1511,7 +1629,7 @@ function titleCard(){
   showCard(
     '<h1>Fennec</h1>' +
     '<p class="lead">' + (hostName ? hostName + ', three ' : 'Three ') +
-      'stretches of real Sahara, with the den at the far end of each. Everything in ' +
+      'five stretches of real Sahara, with the den at the far end of each. Everything in ' +
       'here either eats a fennec or gets eaten by one.</p>' +
     '<div class="keys">' +
       '<div><b>Run</b><span>Arrow keys, A / D, or the pads</span></div>' +
@@ -1535,11 +1653,13 @@ function clearCard(){
   total += bonus;
   showCard(
     '<h2>' + L.name + ' cleared</h2>' +
-    '<p>The den was open. One stretch of desert down.</p>' +
+    '<p>The den was open. ' + plural(lv + 1, 'stretch').replace('stretchs', 'stretches') +
+      ' of desert down, ' + (LEVELS.length - lv - 1) + ' to go.</p>' +
     '<div class="tally"><span>Dates</span><b>' + dates + '</b></div>' +
     '<div class="tally"><span>Hearts left</span><b>' + fox.hearts + ' × 15</b></div>' +
     '<div class="tally tot"><span>Running total</span><b>' + total + '</b></div>' +
-    '<button class="go" id="next">On to ' + LEVELS[lv + 1].name + '</button>');
+    '<button class="go" id="next">On to ' + LEVELS[lv + 1].name +
+      ' (' + (lv + 2) + ' of ' + LEVELS.length + ')</button>');
   document.getElementById('next').onclick = advance;
 }
 
@@ -1559,7 +1679,8 @@ function deathCard(){
 function finalCard(){
   showCard(
     '<h1>Home</h1>' +
-    '<p class="lead">Three stretches of desert, and the fennec is in the den with the lot.</p>' +
+    '<p class="lead">Five stretches of desert, a whole night of them, and the fennec ' +
+      'is home before dawn with the lot.</p>' +
     '<div class="tally"><span>Dates on the last run</span><b>' + dates + '</b></div>' +
     '<div class="tally tot"><span>Final score</span><b>' + total + '</b></div>' +
     '<p style="margin-top:14px;font-size:13px">Met along the way: ' +
@@ -1890,6 +2011,7 @@ let last = performance.now(), frames = 0, lastDt = 0;
 window.__g = { fox: fox, get state(){ return state; }, get lv(){ return lv; },
                get dates(){ return dates; }, get total(){ return total; },
                critters: () => critters, guide: () => GUIDE,
+               resetGuide: () => { for (const k in seen) delete seen[k]; },
                scorps: () => critters.filter(c => c.kind === 'scorpion'),
                pickups: () => pickups, levels: LEVELS,
                advance: advance,

@@ -62,15 +62,19 @@ await p.keyboard.up('ArrowRight');       // every later check sets position itse
 await p.waitForTimeout(120);
 
 // --- jumping and landing on a platform
+// Read the target out of the level rather than naming a coordinate: the stages
+// are generated, so any number written here goes stale the next time they are.
 const landed = await p.evaluate(async () => {
-  __g.fox.x = 290; __g.fox.y = 300; __g.fox.vx = 0; __g.fox.vy = 0;
+  const t = __g.levels[0].plats[0];
+  __g.fox.x = t.x + t.w / 2; __g.fox.y = 300; __g.fox.vx = 0; __g.fox.vy = 0;
   await new Promise(r => setTimeout(r, 60));
   __g.fox.vy = -10.4; __g.fox.onGround = false;
   for (let i = 0; i < 70; i++){ await new Promise(r => requestAnimationFrame(r));
-    if (__g.fox.onGround && __g.fox.y < 290) return +__g.fox.y.toFixed(0); }
-  return +__g.fox.y.toFixed(0);
+    if (__g.fox.onGround && __g.fox.y < 295) return { y:+__g.fox.y.toFixed(0), want:t.y }; }
+  return { y:+__g.fox.y.toFixed(0), want:t.y };
 });
-check('lands on a raised platform (y=238)', landed === 238, 'y=' + landed);
+check('lands on the first raised platform', landed.y === landed.want,
+      'landed y=' + landed.y + ', platform y=' + landed.want);
 
 // --- the ear glide must actually slow the fall
 const [freeFall, glideFall] = await p.evaluate(async () => {
@@ -123,7 +127,9 @@ check('brief invulnerability after a hit', doubleHit);
 
 // --- a pit is fatal
 const pit = await p.evaluate(async () => {
-  __g.fox.hearts = 3; __g.fox.x = 940; __g.fox.y = 200;
+  const g = __g.levels[0].ground;
+  const mid = (g[0][1] + g[1][0]) / 2;          // the middle of the first pit
+  __g.fox.hearts = 3; __g.fox.x = mid; __g.fox.y = 200;
   __g.fox.vx = 0; __g.fox.vy = 6; __g.fox.onGround = false;
   for (let i = 0; i < 90; i++){ await new Promise(r => requestAnimationFrame(r));
     if (__g.state === 'dead') return true; }
@@ -229,8 +235,12 @@ check('no scorpion patrols off its surface', floaters.length === 0,
 
 // the rule must actually bite: a deliberately unreachable platform is caught
 const bites = await p.evaluate(() => {
-  const L = JSON.parse(JSON.stringify(__g.levels[0]));
-  L.plats.push({ x: 700, y: 40, w: 60 });        // far above any possible jump
+  // A bare probe level, so the check does not depend on generated geometry.
+  const L = { name:'probe', w:1200, den:1100, sky:['#000','#000'], hillA:'#000',
+    hillB:'#000', dirt:'#000', crust:'#000', ground:[[0,1200]],
+    plats:[{ x:500, y:40, w:60 }],              // far above any possible jump
+    dates:[], melons:[], flowers:[], spikes:[], scorps:[], jerboas:[],
+    caracals:[], owls:[] };
   return __g.audit(L).problems.filter(s => s.indexOf('y=40') >= 0).length;
 });
 check('the rule catches a platform placed out of reach', bites > 0, bites + ' reported');

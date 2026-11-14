@@ -113,9 +113,11 @@ check('gravity is suspended during the dash', dash.heldHeight < 3,
       'drifted ' + dash.heldHeight);
 
 const flower = await p.evaluate(async () => {
-  __g.goto(1);
+  let f = null;
+  for (let i = 0; i < __g.levels.length && !f; i++){
+    __g.goto(i); f = __g.flowers()[0] || null;
+  }
   __g.fox.dashReady = 0; __g.fox.inv = 999;
-  const f = __g.flowers()[0];
   __g.fox.x = f.x; __g.fox.y = f.y + 26;
   for (let i = 0; i < 3; i++) await new Promise(r => requestAnimationFrame(r));
   return { got: f.got, ready: __g.fox.dashReady,
@@ -193,13 +195,15 @@ for (const a of audits)
         a.problems.length === 0, a.problems.join(' | ') || 'clean');
 
 const assistBites = await p.evaluate(() => {
-  // a platform only a dash can reach must be reported, not quietly allowed
-  const L = JSON.parse(JSON.stringify(__g.levels[0]));
-  // 110 above the ground directly below it: past a plain jump's 91, inside a
-  // Bound's reach, and too far from any neighbour to be had the easy way
-  L.plats.push({ x: 2500, y: 190, w: 40 });
-  const r = __g.audit(L);
-  return r.problems.filter(s => s.indexOf('y=190') >= 0 &&
+  // A bare probe level with one shelf 110 above the ground: past a plain
+  // jump's 91, inside a Bound's reach, and with no neighbour to help. Built
+  // from nothing so it cannot be invalidated by regenerating the stages.
+  const L = { name:'probe', w:1200, den:1100, sky:['#000','#000'], hillA:'#000',
+    hillB:'#000', dirt:'#000', crust:'#000', ground:[[0,1200]],
+    plats:[{ x:500, y:190, w:60 }],
+    dates:[], melons:[], flowers:[], spikes:[], scorps:[], jerboas:[],
+    caracals:[], owls:[] };
+  return __g.audit(L).problems.filter(s => s.indexOf('y=190') >= 0 &&
                                s.indexOf('glide, bound or dash') >= 0).length;
 });
 check('a platform needing an assist is still flagged', assistBites > 0,
@@ -210,9 +214,14 @@ check('a platform needing an assist is still flagged', assistBites > 0,
 const web = await p.evaluate(async () => {
   const frame = () => new Promise(r => requestAnimationFrame(r));
   const out = {};
+  // Find whichever stage actually carries this species rather than naming one:
+  // the stages are generated and the owls are not always on the same level.
   const place = async (kind, above) => {
-    __g.goto(2);                                     // Night Run has all four
-    const c = __g.critters().find(k => k.kind === kind);
+    let c = null;
+    for (let i = 0; i < __g.levels.length && !c; i++){
+      __g.goto(i);
+      c = __g.critters().find(k => k.kind === kind) || null;
+    }
     if (!c) return null;
     __g.fox.hearts = 3; __g.fox.inv = 0; __g.fox.bounds = 0; __g.fox.charge = 0;
     if (above){ __g.fox.x = c.x; __g.fox.y = c.y - 46; __g.fox.vy = 5; __g.fox.onGround = false; }
@@ -241,8 +250,10 @@ check('an eagle-owl cannot be pounced on', web.owlPounce.alive === true &&
       web.owlPounce.hearts < 3, 'alive, hearts ' + web.owlPounce.hearts);
 
 const stalk = await p.evaluate(async () => {
-  __g.goto(2);
-  const c = __g.critters().find(k => k.kind === 'caracal');
+  let c = null;
+  for (let i = 0; i < __g.levels.length && !c; i++){
+    __g.goto(i); c = __g.critters().find(k => k.kind === 'caracal') || null;
+  }
   const calm = c.charge;                       // nothing has seen anything yet
   // Keep the fox alive and on the caracal's own ledge: park it over a pit and
   // the run ends, step() returns early, and the caracal never gets a tick.
@@ -257,7 +268,34 @@ const stalk = await p.evaluate(async () => {
 check('a caracal rouses when it sees you', stalk.roused > stalk.calm,
       'charge ' + stalk.calm + ' → ' + stalk.roused + ' (state ' + stalk.state + ')');
 
+// A charging animal keeps its spawn height for ever, so leaving its ledge
+// means hanging in mid-air. Found in a screenshot, so now it is a check.
+const ledge = await p.evaluate(async () => {
+  const worst = [];
+  for (let i = 0; i < __g.levels.length; i++){
+    __g.goto(i);
+    const cats = __g.critters().filter(c => c.kind === 'caracal');
+    if (!cats.length) continue;
+    __g.fox.inv = 999; __g.fox.hearts = 3;
+    for (const c of cats){
+      for (let f = 0; f < 90; f++){
+        // stand just off its nose so it charges, and keep the fox alive
+        __g.fox.x = c.x + (f % 2 ? 60 : -60); __g.fox.y = c.y;
+        __g.fox.vy = 0; __g.fox.onGround = true;
+        await new Promise(r => requestAnimationFrame(r));
+        if (c.x < c.surf.a - 1 || c.x > c.surf.b + 1)
+          worst.push('L' + (i+1) + ' caracal at ' + Math.round(c.x) +
+                     ' left its ledge ' + Math.round(c.surf.a) + '..' + Math.round(c.surf.b));
+      }
+    }
+  }
+  return worst.slice(0, 3);
+});
+check('a charging caracal stays on its ledge', ledge.length === 0,
+      ledge.join('; ') || 'all held');
+
 const guide = await p.evaluate(async () => {
+  __g.resetGuide();            // earlier checks have already met everything
   __g.goto(0);
   __g.fox.inv = 999;
   const c = __g.critters().find(k => k.kind === 'jerboa');
