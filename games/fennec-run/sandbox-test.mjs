@@ -91,6 +91,28 @@ const got = await p.evaluate(() => window.__got.filter(m => m && m.type === 'sco
 check('the score crossed into the host', got.length === 1, JSON.stringify(got[0] || null));
 check('score is a number', typeof (got[0]||{}).score === 'number', (got[0]||{}).score);
 
+// Sound has to survive the opaque origin too: autoplay is a Permissions Policy
+// and a sandboxed frame does not inherit it by default.
+const sound = await frame.evaluate(async () => {
+  try {
+    __g.snd.start();
+    const ac = __g.snd.ctx();
+    if (!ac) return { state:'no context', peak:0 };
+    const an = ac.createAnalyser(); __g.snd.tap(an);
+    await new Promise(r => setTimeout(r, 1200));
+    const buf = new Float32Array(an.fftSize);
+    let peak = 0;
+    for (let k = 0; k < 12; k++){
+      an.getFloatTimeDomainData(buf);
+      for (let i = 0; i < buf.length; i++) peak = Math.max(peak, Math.abs(buf[i]));
+      await new Promise(r => setTimeout(r, 60));
+    }
+    return { state: ac.state, peak: +peak.toFixed(4) };
+  } catch (e) { return { state: 'error: ' + e, peak: 0 }; }
+});
+check('audio runs inside the sandbox', sound.state === 'running', sound.state);
+check('music is audible inside the sandbox', sound.peak > 0.001, 'peak ' + sound.peak);
+
 await p.screenshot({ path: 'games/fennec-run/in-chat.png' });
 await b.close();
 

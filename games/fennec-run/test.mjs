@@ -132,6 +132,12 @@ const pit = await p.evaluate(async () => {
 check('falling down a pit ends the run', pit);
 check('death card is shown', await p.locator('#card.on').isVisible());
 
+// "1 bombs left" shipped in the last game in this folder. Check the text, not
+// just that a card appeared.
+const wording = await p.evaluate(() => document.getElementById('inner').textContent);
+check('the death card does not say "1 dates"', !/1 dates/.test(wording),
+      (wording.match(/with [^.]*/) || ['?'])[0]);
+
 // --- score posting reaches the parent
 await p.evaluate(() => { window.__sent = []; });
 await p.evaluate(() => {

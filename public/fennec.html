@@ -64,7 +64,27 @@
   #bL::after { content: "\25C0" }
   #bR::after { content: "\25B6" }
   #bJ::after { content: "JUMP" }
+  #bD::after { content: "DASH" }
   .btn::after { pointer-events: none }
+  /* The dash button only exists when a moonflower has been picked up, so the
+     bar does not advertise a verb the fox cannot do yet. */
+  .btn.dash { width: 72px; height: 72px; font-size: 13px;
+              background: #BFD9F2; border-color: #4A6E8A; color: #1F3A52;
+              opacity: 0; transform: scale(.7); pointer-events: none;
+              transition: opacity .15s, transform .15s }
+  body.candash .btn.dash { opacity: 1; transform: none; pointer-events: auto }
+  .btn.dash.on { background: #6FA8D8; color: #fff }
+  #kit { margin-top: 3px; font-size: 13px; letter-spacing: 1px; font-weight: 700 }
+  #mute {
+    position: absolute; right: 10px; bottom: 10px;
+    width: 34px; height: 34px; border-radius: 50%;
+    display: grid; place-items: center; font-size: 15px;
+    background: rgba(255,255,255,.4); border: 2px solid rgba(58,42,24,.35);
+    color: #3A2A18; cursor: pointer; touch-action: none;
+  }
+  #mute::after { content: "\266A"; pointer-events: none }
+  body.quiet #mute { opacity: .45 }
+  body.quiet #mute::after { content: "\266A\0020\00D7" }
 
   /* ---- cards ---- */
   #card {
@@ -108,9 +128,10 @@
   <div id="game">
     <canvas id="cv"></canvas>
     <div id="hud">
-      <div id="hearts"></div>
+      <div><div id="hearts"></div><div id="kit"></div></div>
       <div id="right"><div id="dates"></div><div id="lvl"></div></div>
     </div>
+    <div id="mute" role="button" aria-label="Sound on or off"></div>
   </div>
   <div id="pads">
     <div class="pad">
@@ -118,6 +139,7 @@
       <div class="btn" id="bR" role="button" aria-label="Run right"></div>
     </div>
     <div class="pad">
+      <div class="btn dash" id="bD" role="button" aria-label="Dash"></div>
       <div class="btn jump" id="bJ" role="button" aria-label="Jump"></div>
     </div>
   </div>
@@ -283,6 +305,217 @@ const IDLE_CYCLE = [pose({}), pose({bodyY:1, squash:.975, earL:2, earR:3, headY:
                     pose({bodyY:1, squash:.975, earL:3, earR:4, headY:1}), pose({eye:'blink'})];
 
 /* ============================================================
+   Sound
+
+   Synthesised, because the sandbox has no network and a recorded track would
+   be a hundred times the whole file. That turns out to be the right way round:
+   the score is five layers that fade with the game state rather than three
+   separate tunes, which is how a modern platformer scores itself.
+
+   D Dorian. The raised sixth is what stops it sounding mournful, and the mode
+   does the arid work without reaching for the Phrygian-dominant cliche that
+   every desert level since 1989 has leant on.
+
+   The arrangement follows the animal: a fennec is nocturnal, so the score wakes
+   up as the levels darken. Dune Steps is pad, bass and a frame drum. The Wadi
+   adds the plucked figure. Night Run brings in the lead, which is the first
+   time the melody is stated outright.
+   ============================================================ */
+const SND = (function(){
+  let ac = null, music = null, sfx = null, noise = null;
+  let timer = null, nextT = 0, pos = 0;
+  let enabled = true, level = 0, ducked = false;
+
+  const BPM = 96, S16 = (60 / BPM) / 4;      // one sixteenth, in seconds
+  const nt = n => 440 * Math.pow(2, (n - 69) / 12);
+
+  // i - bVII - IV - i, two bars each. The G major is the Dorian colour.
+  const CHORDS = [[50,57,62,65], [48,55,60,64], [43,55,59,62], [50,57,62,65]];
+  // Eight bars of melody, held back until Night Run.
+  const TUNE = [
+    {t:0,n:69,d:6},{t:8,n:72,d:4},{t:12,n:74,d:8},{t:24,n:72,d:4},{t:28,n:71,d:8},
+    {t:40,n:69,d:6},{t:48,n:67,d:4},{t:52,n:69,d:10},{t:64,n:74,d:6},{t:72,n:76,d:4},
+    {t:76,n:74,d:8},{t:88,n:72,d:4},{t:92,n:71,d:10},{t:108,n:69,d:6},{t:116,n:65,d:12}
+  ];
+  // pad, bass, drum, pluck, lead
+  const MIX = [[.26,.20,.13,.00,.00],
+               [.26,.22,.20,.15,.00],
+               [.28,.24,.22,.17,.17]];
+
+  function mk(){
+    if (ac) return true;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return false;
+      ac = new AC();
+      music = ac.createGain(); music.gain.value = 0.9;
+      sfx   = ac.createGain(); sfx.gain.value = 0.9;
+      music.connect(ac.destination); sfx.connect(ac.destination);
+      noise = ac.createBuffer(1, ac.sampleRate * 0.6, ac.sampleRate);
+      const d = noise.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      return true;
+    } catch (e) { ac = null; return false; }
+  }
+
+  function pad(t, midi, dur, g){
+    const a = ac.createOscillator(), b = ac.createOscillator();
+    const f = ac.createBiquadFilter(), v = ac.createGain();
+    a.type = b.type = 'sawtooth';
+    a.frequency.value = nt(midi); b.frequency.value = nt(midi) * 1.005;
+    f.type = 'lowpass'; f.frequency.value = 820; f.Q.value = 0.7;
+    v.gain.setValueAtTime(0.0001, t);
+    v.gain.linearRampToValueAtTime(g, t + 0.7);
+    v.gain.setTargetAtTime(0.0001, t + dur * 0.7, 0.35);
+    a.connect(f); b.connect(f); f.connect(v); v.connect(music);
+    a.start(t); b.start(t); a.stop(t + dur + 0.8); b.stop(t + dur + 0.8);
+  }
+  function pluck(t, midi, g){
+    const o = ac.createOscillator(), f = ac.createBiquadFilter(), v = ac.createGain();
+    o.type = 'triangle'; o.frequency.value = nt(midi);
+    f.type = 'lowpass';
+    f.frequency.setValueAtTime(3200, t);
+    f.frequency.exponentialRampToValueAtTime(700, t + 0.3);
+    v.gain.setValueAtTime(0.0001, t);
+    v.gain.linearRampToValueAtTime(g, t + 0.006);
+    v.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
+    o.connect(f); f.connect(v); v.connect(music);
+    o.start(t); o.stop(t + 0.45);
+  }
+  function lead(t, midi, dur, g){
+    const o = ac.createOscillator(), v = ac.createGain();
+    const lfo = ac.createOscillator(), amt = ac.createGain();
+    o.type = 'triangle'; o.frequency.value = nt(midi);
+    lfo.frequency.value = 5.1; amt.gain.value = 3.4;   // breath, not pitch wobble
+    lfo.connect(amt); amt.connect(o.frequency);
+    v.gain.setValueAtTime(0.0001, t);
+    v.gain.linearRampToValueAtTime(g, t + 0.09);
+    v.gain.setTargetAtTime(0.0001, t + dur * 0.75, 0.14);
+    o.connect(v); v.connect(music);
+    o.start(t); lfo.start(t); o.stop(t + dur + 0.5); lfo.stop(t + dur + 0.5);
+  }
+  function bass(t, midi, dur, g){
+    const o = ac.createOscillator(), v = ac.createGain();
+    o.type = 'sine'; o.frequency.value = nt(midi);
+    v.gain.setValueAtTime(0.0001, t);
+    v.gain.linearRampToValueAtTime(g, t + 0.03);
+    v.gain.setTargetAtTime(0.0001, t + dur * 0.6, 0.12);
+    o.connect(v); v.connect(music); o.start(t); o.stop(t + dur + 0.3);
+  }
+  function skin(t, g, hz, dur, bus){
+    const s = ac.createBufferSource(), f = ac.createBiquadFilter(), v = ac.createGain();
+    s.buffer = noise;
+    f.type = 'bandpass'; f.frequency.value = hz; f.Q.value = 1.1;
+    v.gain.setValueAtTime(g, t);
+    v.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s.connect(f); f.connect(v); v.connect(bus || music);
+    s.start(t); s.stop(t + dur + 0.05);
+  }
+
+  // Frame drum: a dull skin on the downbeats, a tighter tap between them.
+  const DRUM = [2,0,0,1, 0,0,1,0, 2,0,1,0, 0,1,0,1];
+
+  function bar(step, t){
+    const m = MIX[Math.min(level, MIX.length - 1)];
+    const duck = ducked ? 0.35 : 1;
+    const chord = CHORDS[Math.floor(step / 32) % CHORDS.length];
+    const inBar = step % 16;
+
+    if (step % 32 === 0 && m[0])
+      for (const n of chord) pad(t, n, S16 * 32, m[0] * duck * (n < 55 ? .7 : .5));
+    if (m[1] && (inBar === 0 || inBar === 10))
+      bass(t, chord[0] - 12, S16 * 5, m[1] * duck);
+    if (m[2]){
+      const hit = DRUM[inBar];
+      if (hit === 2){ skin(t, m[2] * duck, 190, 0.22); bass(t, 38, 0.1, m[2] * duck * .5); }
+      else if (hit === 1) skin(t, m[2] * duck * 0.45, 1500, 0.06);
+    }
+    if (m[3] && step % 2 === 0){
+      const seq = [0, 2, 1, 3, 2, 1];
+      pluck(t, chord[seq[(step / 2) % seq.length]] + 12, m[3] * duck * 0.8);
+    }
+    if (m[4])
+      for (const e of TUNE) if (e.t === step % 128) lead(t, e.n, S16 * e.d, m[4] * duck);
+  }
+
+  function pump(){
+    if (!ac) return;
+    try {
+      while (nextT < ac.currentTime + 0.15){
+        if (nextT < ac.currentTime) nextT = ac.currentTime + 0.02;
+        bar(pos, nextT);
+        nextT += S16; pos = (pos + 1) % 128;
+      }
+    } catch (e) { /* a dropped frame of music is not worth a crash */ }
+  }
+
+  return {
+    // Called from the first real tap, which is the gesture the browser wants.
+    start: function(){
+      if (!enabled || !mk()) return;
+      try {
+        if (ac.state === 'suspended') ac.resume();
+        if (!timer){ nextT = ac.currentTime + 0.08; pos = 0; timer = setInterval(pump, 25); }
+      } catch (e) { /* no sound is survivable; a thrown error is not */ }
+    },
+    setLevel: function(n){ level = n; },
+    // Exposed so a test can measure the output instead of trusting that a node
+    // was created. Harmless in play.
+    ctx: function(){ return ac; },
+    tap: function(node){ if (ac){ music.connect(node); sfx.connect(node); } },
+    duck: function(v){ ducked = !!v; },
+    enabled: function(){ return enabled; },
+    toggle: function(){
+      enabled = !enabled;
+      try {
+        if (!enabled){ if (timer){ clearInterval(timer); timer = null; } if (ac) ac.suspend(); }
+        else this.start();
+      } catch (e) { /* ignore */ }
+      return enabled;
+    },
+    // --- effects, all cheap and all forgiving ---
+    blip: function(midi, g, type){
+      if (!enabled || !ac) return;
+      try {
+        const o = ac.createOscillator(), v = ac.createGain(), t = ac.currentTime;
+        o.type = type || 'triangle'; o.frequency.value = nt(midi);
+        v.gain.setValueAtTime(0.0001, t);
+        v.gain.linearRampToValueAtTime(g, t + 0.008);
+        v.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+        o.connect(v); v.connect(sfx); o.start(t); o.stop(t + 0.2);
+      } catch (e) { /* ignore */ }
+    },
+    sweep: function(a, b, g, dur, type){
+      if (!enabled || !ac) return;
+      try {
+        const o = ac.createOscillator(), v = ac.createGain(), t = ac.currentTime;
+        o.type = type || 'sawtooth';
+        o.frequency.setValueAtTime(nt(a), t);
+        o.frequency.exponentialRampToValueAtTime(nt(b), t + dur);
+        v.gain.setValueAtTime(0.0001, t);
+        v.gain.linearRampToValueAtTime(g, t + 0.01);
+        v.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        o.connect(v); v.connect(sfx); o.start(t); o.stop(t + dur + 0.05);
+      } catch (e) { /* ignore */ }
+    },
+    hiss: function(g, hz, dur){
+      if (!enabled || !ac || !noise) return;
+      try { skin(ac.currentTime, g, hz, dur, sfx); } catch (e) { /* ignore */ }
+    },
+    date:   function(){ this.blip(81 + (Math.random() * 3 | 0), 0.1); },
+    jump:   function(){ this.sweep(62, 74, 0.06, 0.13, 'triangle'); },
+    bound:  function(){ this.sweep(69, 84, 0.08, 0.17, 'triangle'); this.hiss(0.05, 2600, 0.12); },
+    dash:   function(){ this.sweep(88, 60, 0.09, 0.2, 'sawtooth'); this.hiss(0.1, 1800, 0.18); },
+    stomp:  function(){ this.sweep(55, 36, 0.11, 0.17, 'square'); },
+    hurt:   function(){ this.sweep(60, 41, 0.13, 0.32, 'sawtooth'); },
+    melon:  function(){ [69,74,78].forEach((n,i) => setTimeout(() => this.blip(n, 0.1), i * 70)); },
+    flower: function(){ [76,81,88].forEach((n,i) => setTimeout(() => this.blip(n, 0.09, 'sine'), i * 60)); },
+    win:    function(){ [62,66,69,74].forEach((n,i) => setTimeout(() => this.blip(n, 0.11), i * 110)); },
+    lose:   function(){ this.sweep(57, 33, 0.14, 0.7, 'sawtooth'); }
+  };
+})();
+
+/* ============================================================
    Levels
 
    THE REACHABILITY RULE. A stage is only valid if audit() returns no
@@ -325,6 +558,8 @@ const LEVELS = [
     plats: [ {x:300,y:238,w:120}, {x:480,y:188,w:100}, {x:665,y:238,w:110},
              {x:1055,y:230,w:140}, {x:1255,y:178,w:110}, {x:1455,y:235,w:120},
              {x:1880,y:228,w:130}, {x:2085,y:182,w:110}, {x:2265,y:240,w:120} ],
+    melons:  [ {x:942, y:244} ],
+    flowers: [ {x:820, y:258} ],
     spikes: [ {x:760, w:54} ],
     scorps: [ {x:560, a:470, b:690}, {x:1500, a:1420, b:1640} ],
     dates: [].concat(
@@ -341,6 +576,8 @@ const LEVELS = [
              {x:1000,y:210,w:110}, {x:1190,y:175,w:100}, {x:1400,y:238,w:120},
              {x:1700,y:240,w:100}, {x:1870,y:185,w:100}, {x:2040,y:235,w:110},
              {x:2380,y:230,w:110}, {x:2560,y:180,w:120}, {x:2760,y:232,w:120} ],
+    melons:  [ {x:1625, y:246}, {x:2285, y:246} ],
+    flowers: [ {x:1000, y:258}, {x:2400, y:196} ],
     spikes: [ {x:430, w:60}, {x:1460, w:54}, {x:2160, w:60} ],
     scorps: [ {x:340, a:300, b:400}, {x:1030, a:1000, b:1110},
               {x:1920, a:1870, b:1970}, {x:2600, a:2560, b:2680} ],
@@ -362,6 +599,8 @@ const LEVELS = [
              {x:1960,y:236,w:95}, {x:2120,y:182,w:95}, {x:2330,y:234,w:100},
              {x:2560,y:186,w:100}, {x:2740,y:236,w:100}, {x:2910,y:182,w:100},
              {x:3140,y:238,w:110} ],
+    melons:  [ {x:1025, y:244}, {x:2565, y:244} ],
+    flowers: [ {x:700, y:258}, {x:2000, y:258} ],
     spikes: [ {x:360, w:54}, {x:1180, w:54}, {x:1700, w:60}, {x:2220, w:60}, {x:3020, w:54} ],
     scorps: [ {x:290, a:250, b:340}, {x:980, a:940, b:1030},
               {x:1660, a:1620, b:1710}, {x:2160, a:2120, b:2215},
@@ -402,17 +641,24 @@ addEventListener('orientationchange', resize);
 if (window.ResizeObserver) new ResizeObserver(resize).observe(cv);
 
 const fox = { x:60, y:GY, vx:0, vy:0, dir:1, onGround:true, f:0, step:0,
-              hearts:3, inv:0, gliding:false, coyote:0, buffer:0 };
+              hearts:3, inv:0, gliding:false, coyote:0, buffer:0,
+              bounds:0, charge:0, usedBound:false,
+              dashReady:0, dashing:0, dashBuf:0 };
 let lv = 0, L = LEVELS[0], dates = 0, total = 0, runDates = 0;
 let state = 'title';                   // title | play | dead | clear | done
 let cam = 0, t = 0, deathY = 0;
-let scorps = [], pickups = [], parts = [];
+let scorps = [], pickups = [], parts = [], melons = [], flowers = [];
 let hostName = '';
 
 function loadLevel(i){
   lv = i; L = LEVELS[i];
   fox.x = 60; fox.y = GY; fox.vx = 0; fox.vy = 0; fox.dir = 1;
   fox.inv = 0; fox.gliding = false; fox.coyote = 0; fox.buffer = 0;
+  fox.bounds = 0; fox.charge = 0; fox.usedBound = false;
+  fox.dashReady = 0; fox.dashing = 0; fox.dashBuf = 0;
+  melons  = (L.melons  || []).map(m => ({ x:m.x, y:m.y, got:false }));
+  flowers = (L.flowers || []).map(m => ({ x:m.x, y:m.y, got:false }));
+  SND.setLevel(i);
   dates = 0; cam = 0;
   scorps  = L.scorps.map(s => ({ x:s.x, a:s.a, b:s.b, dir:1, y:GY, alive:true, w:11 }));
   pickups = L.dates.map(d => ({ x:d.x, y:d.y, got:false }));
@@ -443,10 +689,12 @@ function surfaceAt(px){
 
 /* ---------- input ---------- */
 const keys = {};
-const held = { L:false, R:false, J:false };
+const held = { L:false, R:false, J:false, D:false };
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   if (!keys[k] && (k === ' ' || k === 'arrowup' || k === 'w')) fox.buffer = 8;
+  if (!keys[k] && (k === 'shift' || k === 'x' || k === 'k')) fox.dashBuf = 8;
+  if (!keys[k] && k === 'm') toggleSound();
   keys[k] = true;
   if ([' ','arrowup','arrowdown','arrowleft','arrowright'].indexOf(k) >= 0) e.preventDefault();
   if (state !== 'play' && (k === ' ' || k === 'enter')) { e.preventDefault(); advance(); }
@@ -468,7 +716,8 @@ addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 const BTN = [
   { k:'L', el: document.getElementById('bL') },
   { k:'R', el: document.getElementById('bR') },
-  { k:'J', el: document.getElementById('bJ') }
+  { k:'J', el: document.getElementById('bJ') },
+  { k:'D', el: document.getElementById('bD') }
 ];
 const SLOP = 12;                       // thumbs are not precise
 const active = new Map();              // pointerId -> {x, y}
@@ -481,10 +730,11 @@ function overBtn(b, p){
 function onAnyBtn(p){ return BTN.some(b => overBtn(b, p)); }
 
 function refresh(){
-  const now = { L:false, R:false, J:false };
+  const now = { L:false, R:false, J:false, D:false };
   for (const p of active.values())
     for (const b of BTN) if (overBtn(b, p)) now[b.k] = true;
   if (now.J && !held.J) fox.buffer = 8;        // rising edge only
+  if (now.D && !held.D) fox.dashBuf = 8;
   for (const b of BTN){
     held[b.k] = now[b.k];
     b.el.classList.toggle('on', now[b.k]);
@@ -533,6 +783,12 @@ const wantJ = () => held.J || keys[' '] || keys['arrowup'] || keys['w'];
 
 /* ---------- physics ---------- */
 const GRAV = 0.56, RUNV = 3.25, JUMPV = -10.4, GLIDE_VY = 1.7, TERM = 15;
+// The Bound: a second jump, slightly weaker, bought with dates. Fennecs pounce.
+const BOUNDV = -8.9, DATES_PER_BOUND = 5, MAX_BOUNDS = 3;
+// The Dash: granted by a moonflower, one stored at a time. Horizontal only, and
+// gravity is suspended for its duration, which is what makes it feel like a dash
+// rather than a shove.
+const DASHV = 7.6, DASH_FRAMES = 10;
 
 function hurt(from){
   if (fox.inv > 0) return;
@@ -540,6 +796,7 @@ function hurt(from){
   fox.vy = -5.4;
   fox.vx = (from !== undefined && from > fox.x ? -1 : 1) * 3.4;
   burst(fox.x, fox.y - 28, '#D96A52', 9);
+  SND.hurt();
   if (fox.hearts <= 0) endRun(false);
 }
 
@@ -560,15 +817,39 @@ function step(dt){
 
   if (fox.coyote > 0) fox.coyote -= dt;
   if (fox.buffer > 0) fox.buffer -= dt;
+  if (fox.dashBuf > 0) fox.dashBuf -= dt;
+
   if (fox.buffer > 0 && fox.coyote > 0){
     fox.vy = JUMPV; fox.onGround = false; fox.coyote = 0; fox.buffer = 0;
+    fox.usedBound = false;
     burst(fox.x, fox.y - 2, '#E8D2A8', 5);
+    SND.jump();
+  } else if (fox.buffer > 0 && !fox.onGround && !fox.usedBound && fox.bounds > 0){
+    // the Bound, in the air, once per trip
+    fox.vy = BOUNDV; fox.bounds--; fox.usedBound = true; fox.buffer = 0;
+    burst(fox.x, fox.y - 18, '#F6CFC6', 10);
+    SND.bound();
   }
 
-  // the ear glide: hold jump on the way down and the fall slows right off
-  fox.gliding = !fox.onGround && fox.vy > 0.6 && wantJ();
-  fox.vy = fox.gliding ? Math.min(fox.vy + GRAV * dt, GLIDE_VY)
-                       : Math.min(fox.vy + GRAV * dt, TERM);
+  if (fox.dashBuf > 0 && fox.dashReady > 0 && fox.dashing <= 0){
+    fox.dashing = DASH_FRAMES; fox.dashReady--; fox.dashBuf = 0;
+    burst(fox.x, fox.y - 24, '#CFE8FF', 12);
+    SND.dash();
+  }
+
+  if (fox.dashing > 0){
+    // gravity off, direction locked: the dash is its own little world
+    fox.dashing -= dt;
+    fox.vx = DASHV * fox.dir;
+    fox.vy = 0;
+    fox.gliding = false;
+    if (Math.random() < 0.6) burst(fox.x, fox.y - 24, '#CFE8FF', 1);
+  } else {
+    // the ear glide: hold jump on the way down and the fall slows right off
+    fox.gliding = !fox.onGround && fox.vy > 0.6 && wantJ();
+    fox.vy = fox.gliding ? Math.min(fox.vy + GRAV * dt, GLIDE_VY)
+                         : Math.min(fox.vy + GRAV * dt, TERM);
+  }
 
   fox.x = Math.max(16, Math.min(L.w - 16, fox.x + fox.vx * dt));
   const prevY = fox.y;
@@ -584,8 +865,7 @@ function step(dt){
       fox.y = p.y; fox.vy = 0; fox.onGround = true;
     }
   }
-  if (fox.onGround && !wasGround) fox.coyote = 6;
-  else if (fox.onGround) fox.coyote = 6;
+  if (fox.onGround){ fox.coyote = 6; fox.usedBound = false; }
 
   if (fox.y > WH + 90){ fox.hearts = 0; endRun(false); return; }   // down a pit
 
@@ -606,17 +886,40 @@ function step(dt){
       if (fox.vy > 1.2 && prevY < s.y - 12){
         s.alive = false; fox.vy = -7.6; fox.buffer = 0;
         burst(s.x, s.y - 8, '#8C4A3A', 12);
-        runDates += 2;
+        runDates += 2; SND.stomp();
       } else hurt(s.x);
     }
   }
 
-  // dates
+  // dates: score, and the charge that buys a Bound
   for (const p of pickups){
     if (p.got) continue;
     if (Math.abs(p.x - fox.x) < 19 && Math.abs(p.y - (fox.y - 26)) < 26){
       p.got = true; dates++; runDates++;
       burst(p.x, p.y, '#E8A563', 6);
+      SND.date();
+      if (++fox.charge >= DATES_PER_BOUND){
+        fox.charge = 0;
+        if (fox.bounds < MAX_BOUNDS){ fox.bounds++; burst(fox.x, fox.y - 30, '#F6CFC6', 12); }
+      }
+    }
+  }
+
+  // melon: water in the desert, which is where a fennec actually gets it
+  for (const m of melons){
+    if (m.got) continue;
+    if (Math.abs(m.x - fox.x) < 22 && Math.abs(m.y - (fox.y - 26)) < 28){
+      m.got = true; burst(m.x, m.y, '#8FC96F', 14); SND.melon();
+      if (fox.hearts < 3) fox.hearts++; else runDates += 5;
+    }
+  }
+
+  // moonflower: one dash, kept until it is spent
+  for (const f of flowers){
+    if (f.got) continue;
+    if (Math.abs(f.x - fox.x) < 22 && Math.abs(f.y - (fox.y - 26)) < 28){
+      f.got = true; fox.dashReady = Math.min(fox.dashReady + 1, 2);
+      burst(f.x, f.y, '#CFE8FF', 14); SND.flower();
     }
   }
 
@@ -633,7 +936,11 @@ function step(dt){
   cam += (Math.max(0, Math.min(L.w - VW, target)) - cam) * Math.min(0.12 * dt, 1);
 }
 
+const P_DASH = pose({legs:[-26,-20,-30,-34], bodyY:-2, bodyRot:-4, tail:-34,
+                     earL:-34, earR:-30, headY:-1, eye:'squint', squash:0.9});
+
 function currentPose(){
+  if (fox.dashing > 0) return P_DASH;
   if (fox.inv > 60) return P_HURT;
   if (!fox.onGround){
     if (fox.gliding) return P_GLIDE;
@@ -724,6 +1031,44 @@ function drawDate(p, i){
   x.beginPath(); x.ellipse(-1.8, -3, 1.3, 2, -.4, 0, 7); x.fill();
   x.strokeStyle = '#6B5231'; x.lineWidth = 1.4; x.lineCap = 'round';
   x.beginPath(); x.moveTo(0, -7.6); x.lineTo(1.6, -10.4); x.stroke();
+  x.restore();
+}
+
+function drawMelon(m, i){
+  if (m.got) return;
+  const py = m.y + Math.sin(t / 26 + i) * 2;
+  x.save(); x.translate(m.x - cam, py);
+  x.fillStyle = '#3F7A3A';
+  x.beginPath(); x.ellipse(0, 0, 11, 9.5, 0, 0, 7); x.fill();
+  x.strokeStyle = '#8FC96F'; x.lineWidth = 1.6;
+  for (let k = -1; k <= 1; k++){
+    x.beginPath(); x.moveTo(k * 5.2, -9); x.quadraticCurveTo(k * 7.5, 0, k * 5.2, 9); x.stroke();
+  }
+  x.fillStyle = 'rgba(255,255,255,.4)';
+  x.beginPath(); x.ellipse(-4, -4.4, 2.6, 1.8, -.5, 0, 7); x.fill();
+  x.strokeStyle = '#6B5231'; x.lineWidth = 1.6; x.lineCap = 'round';
+  x.beginPath(); x.moveTo(0, -9.4); x.lineTo(2, -12.6); x.stroke();
+  x.restore();
+}
+
+function drawFlower(f, i){
+  if (f.got) return;
+  const py = f.y + Math.sin(t / 20 + i) * 2.6;
+  const spin = t / 40 + i;
+  x.save(); x.translate(f.x - cam, py);
+  x.globalAlpha = .35;
+  x.fillStyle = '#CFE8FF';
+  x.beginPath(); x.arc(0, 0, 13 + Math.sin(t / 18 + i) * 1.5, 0, 7); x.fill();
+  x.globalAlpha = 1;
+  x.rotate(spin);
+  for (let k = 0; k < 5; k++){
+    x.rotate(Math.PI * 2 / 5);
+    x.fillStyle = '#EAF2FF';
+    x.beginPath(); x.ellipse(0, -6.4, 3.2, 5.4, 0, 0, 7); x.fill();
+    x.strokeStyle = '#7FA8CC'; x.lineWidth = 1.2; x.stroke();
+  }
+  x.fillStyle = '#FFE08A';
+  x.beginPath(); x.arc(0, 0, 3.1, 0, 7); x.fill();
   x.restore();
 }
 
@@ -833,6 +1178,8 @@ function render(){
   }
 
   pickups.forEach(drawDate);
+  melons.forEach(drawMelon);
+  flowers.forEach(drawFlower);
   scorps.forEach(s => { if (s.alive) drawScorpion(s); });
 
   for (const p of parts){
@@ -863,14 +1210,32 @@ const card = document.getElementById('card'), inner = document.getElementById('i
 const elHearts = document.getElementById('hearts'), elDates = document.getElementById('dates'),
       elLvl = document.getElementById('lvl');
 
+// "1 dates" shipped in Tic Tak Toe BOOM! as "1 bombs left" and went out to a
+// friend. Once is enough.
+function plural(n, word){ return n + ' ' + word + (n === 1 ? '' : 's'); }
 function showCard(html){ inner.innerHTML = html; card.classList.add('on'); }
 function hideCard(){ card.classList.remove('on'); }
 
+const elKit = document.getElementById('kit');
 function hud(){
   elHearts.textContent = '♥ '.repeat(Math.max(0, fox.hearts)).trim() || '·';
   elDates.textContent  = '• ' + dates + ' / ' + pickups.length;
   elLvl.textContent    = (lv + 1) + ' — ' + L.name;
+  // bounds as filled pips, then the charge creeping toward the next one
+  let k = '◆'.repeat(fox.bounds) + '◇'.repeat(Math.max(0, MAX_BOUNDS - fox.bounds));
+  if (fox.dashReady > 0) k += '  ⇢'.repeat(fox.dashReady);
+  elKit.textContent = k;
+  document.body.classList.toggle('candash', fox.dashReady > 0);
 }
+
+function toggleSound(){
+  const on = SND.toggle();
+  document.body.classList.toggle('quiet', !on);
+}
+const elMute = document.getElementById('mute');
+elMute.addEventListener('pointerdown', e => {
+  e.preventDefault(); e.stopPropagation(); toggleSound();
+});
 
 function postScore(score, detail){
   if (window.parent !== window)
@@ -879,6 +1244,8 @@ function postScore(score, detail){
 
 function endRun(cleared){
   if (state !== 'play') return;
+  SND.duck(true);
+  if (cleared) SND.win(); else SND.lose();
   if (cleared){
     total += dates;
     if (lv === LEVELS.length - 1){ state = 'done'; finalCard(true); }
@@ -900,8 +1267,13 @@ function titleCard(){
       '<div><b>Run</b><span>Arrow keys, A / D, or the pads</span></div>' +
       '<div><b>Jump</b><span>Space, Up, or JUMP</span></div>' +
       '<div><b>Ear glide</b><span>Hold jump as you fall</span></div>' +
+      '<div><b>Bound</b><span>' + DATES_PER_BOUND + ' dates buy a second jump, ' +
+        'used in the air</span></div>' +
+      '<div><b>Dash</b><span>A moonflower gives you one. Shift, X, or DASH</span></div>' +
+      '<div><b>Melon</b><span>Water, and a heart back. Never anywhere safe</span></div>' +
       '<div><b>Scorpions</b><span>Land on one, worth 2 dates</span></div>' +
       '<div><b>Hearts</b><span>Three, and a pit takes the lot</span></div>' +
+      '<div><b>Sound</b><span>M, or the note in the corner</span></div>' +
     '</div>' +
     '<button class="go" id="start">Start running</button>');
   document.getElementById('start').onclick = advance;
@@ -923,7 +1295,8 @@ function clearCard(){
 function deathCard(){
   showCard(
     '<h2>Out of hearts</h2>' +
-    '<p>The desert got there first. ' + L.name + ', with ' + dates + ' dates in the bag.</p>' +
+    '<p>The desert got there first. ' + L.name + ', with ' + plural(dates, 'date') +
+      ' in the bag.</p>' +
     '<div class="tally tot"><span>Final score</span><b>' + (total + dates) + '</b></div>' +
     '<button class="go" id="retry">Try ' + L.name + ' again</button>' +
     '<button class="go ghost" id="post">Post the score to the chat</button>' +
@@ -958,6 +1331,8 @@ function wirePost(score, detail){
 
 function advance(){
   hideCard();
+  SND.start();                 // the tap that got us here is the gesture
+  SND.duck(false);
   if (state === 'title'){ total = 0; loadLevel(0); }
   else if (state === 'clear') loadLevel(lv + 1);
   else if (state === 'dead'){ fox.hearts = 3; loadLevel(lv); }
@@ -1002,12 +1377,22 @@ function speedAfter(runway){
 }
 
 // One flight, integrated exactly as step() does: vy first, then position.
-function flight(L, S, from, x0, dir, vy0, glide, speed){
+function flight(L, S, from, x0, dir, vy0, glide, speed, boundAt, dashAt){
   const path = [];
-  let x = x0, y = from.y, vy = vy0;
+  let x = x0, y = from.y, vy = vy0, dashing = 0;
   const vx = (speed === undefined ? RUNV : speed) * dir;
   for (let f = 0; f < 220; f++){
     const prevY = y;
+    // Every ability the fox gains has to appear here, or the rule quietly
+    // stops describing the game it is meant to be checking.
+    if (f === dashAt && dashing <= 0) dashing = DASH_FRAMES;
+    if (dashing > 0){
+      dashing--; x += DASHV * dir; vy = 0;
+      path.push({ x:x, y:y });
+      if (x < 8 || x > L.w - 8) return { to:null, path:path };
+      continue;
+    }
+    if (f === boundAt) vy = BOUNDV;
     vy = (glide && vy > 0.6) ? Math.min(vy + GRAV, GLIDE_VY) : Math.min(vy + GRAV, TERM);
     y += vy; x += vx;
     path.push({ x:x, y:y });
@@ -1030,23 +1415,37 @@ function flight(L, S, from, x0, dir, vy0, glide, speed){
 
 // Every way off a surface: jump from anywhere along it, or walk off either end,
 // each with and without the glide, in both directions.
+// Assisted variants are sampled at a few timings rather than every frame: the
+// question is whether a route exists at all, not how tight its window is.
+// Charge economy is deliberately NOT modelled. An assisted route is treated as
+// available, which is the generous reading, and is why assists may only ever be
+// required for optional fruit and never for traversal.
+const BOUND_AT = [6, 14, 22], DASH_AT = [1, 10, 20];
+
 function flightsFrom(L, S, s){
   const out = [];
+  const add = (f, glide, assist, launch) =>
+    out.push(Object.assign(f, { from:s, glide:glide, assist:assist, launch:launch }));
+
   for (let x = s.x0; x <= s.x1 + 0.01; x = Math.min(x + 20, s.x1 + 0.001)){
     for (const dir of [-1, 1]){
       // run-up is whatever lies behind you on this surface
       const speed = speedAfter(dir > 0 ? x - s.x0 : s.x1 - x);
       for (const glide of [false, true])
-        out.push(Object.assign(flight(L, S, s, x, dir, JUMPV, glide, speed),
-                               { from:s, glide:glide, launch:x }));
+        add(flight(L, S, s, x, dir, JUMPV, glide, speed, -1, -1), glide, false, x);
+      for (const b of BOUND_AT)
+        add(flight(L, S, s, x, dir, JUMPV, false, speed, b, -1), false, true, x);
+      for (const d of DASH_AT)
+        add(flight(L, S, s, x, dir, JUMPV, false, speed, -1, d), false, true, x);
     }
     if (x >= s.x1) break;
   }
   for (const [edge, dir] of [[s.x0 - 1, -1], [s.x1 + 1, 1]]){
     const speed = speedAfter(s.x1 - s.x0);
     for (const glide of [false, true])
-      out.push(Object.assign(flight(L, S, s, edge, dir, 0, glide, speed),
-                             { from:s, glide:glide, launch:edge }));
+      add(flight(L, S, s, edge, dir, 0, glide, speed, -1, -1), glide, false, edge);
+    for (const d of DASH_AT)
+      add(flight(L, S, s, edge, dir, 0, false, speed, -1, d), false, true, edge);
   }
   return out;
 }
@@ -1110,7 +1509,8 @@ function audit(L){
     while (q.length){
       const s = q.shift();
       for (const f of all.get(s)){
-        if (!f.to || (f.glide && !useGlide) || seen.has(f.to)) continue;
+        if (!f.to || seen.has(f.to)) continue;
+        if (!useGlide && (f.glide || f.assist)) continue;   // plain jumps only
         seen.add(f.to); q.push(f.to);
       }
     }
@@ -1134,7 +1534,7 @@ function audit(L){
     let best = Infinity;
     for (const from of S){
       if (!plainReach.has(from) || from === s) continue;
-      if (!all.get(from).some(f => f.to === s && !f.glide)) continue;
+      if (!all.get(from).some(f => f.to === s && !f.glide && !f.assist)) continue;
       const rise = from.y - s.y;                       // positive: climbing
       if (rise > env0.usableRise) continue;
       const gap = s.x0 > from.x1 ? s.x0 - from.x1
@@ -1151,7 +1551,7 @@ function audit(L){
     const what = (s.ground ? 'ground' : 'platform') + ' at x=' + Math.round(s.x0) +
                  '..' + Math.round(s.x1) + ' y=' + s.y;
     if (!reach.has(s)) problems.push(what + ' cannot be reached at all');
-    else if (!plainReach.has(s)) problems.push(what + ' needs a glide to reach');
+    else if (!plainReach.has(s)) problems.push(what + ' needs a glide, bound or dash to reach');
     else if (effort.get(s) > TIGHT)
       problems.push(what + ' needs ' + Math.round(effort.get(s) * 100) +
                     '% of a maximum jump, over the ' + Math.round(TIGHT * 100) + '% limit');
@@ -1159,21 +1559,25 @@ function audit(L){
 
   // A date counts as reachable if standing anywhere reachable picks it up, or
   // any flight from anywhere reachable passes through it. Same test step() uses.
-  const near = (d, x, y) => Math.abs(d.x - x) < 19 && Math.abs(d.y - (y - 26)) < 26;
-  for (const d of L.dates){
-    let got = false;
+  const gettable = (d, rx, ry) => {
+    const near = (x, y) => Math.abs(d.x - x) < rx && Math.abs(d.y - (y - 26)) < ry;
     for (const s of S){
       if (!reach.has(s)) continue;
-      for (let x = s.x0 - 12; x <= s.x1 + 12 && !got; x += 4) if (near(d, x, s.y)) got = true;
-      if (got) break;
-      for (const f of all.get(s)){
-        for (const pt of f.path) if (near(d, pt.x, pt.y)){ got = true; break; }
-        if (got) break;
-      }
-      if (got) break;
+      for (let x = s.x0 - 12; x <= s.x1 + 12; x += 4) if (near(x, s.y)) return true;
+      for (const f of all.get(s))
+        for (const pt of f.path) if (near(pt.x, pt.y)) return true;
     }
-    if (!got) problems.push('date at x=' + d.x + ' y=' + d.y + ' cannot be collected');
-  }
+    return false;
+  };
+  for (const d of L.dates)
+    if (!gettable(d, 19, 26))
+      problems.push('date at x=' + d.x + ' y=' + d.y + ' cannot be collected');
+  for (const d of (L.melons || []))
+    if (!gettable(d, 22, 28))
+      problems.push('melon at x=' + d.x + ' y=' + d.y + ' cannot be collected');
+  for (const d of (L.flowers || []))
+    if (!gettable(d, 22, 28))
+      problems.push('moonflower at x=' + d.x + ' y=' + d.y + ' cannot be collected');
 
   // The den has to be stood on, and every pit has to be crossable.
   if (!L.ground.some(g => L.den >= g[0] && L.den <= g[1]))
@@ -1237,6 +1641,8 @@ window.__g = { fox: fox, get state(){ return state; }, get lv(){ return lv; },
                get t(){ return t; }, get frames(){ return frames; },
                get view(){ return { VW:VW, VH:VH, yOff:yOff, scale:scale }; },
                audit: audit, envelope: envelope,
+               melons: () => melons, flowers: () => flowers,
+               snd: SND,
                get lastDt(){ return lastDt; },
                goto: n => { loadLevel(n); fox.hearts = 3; state = 'play'; hideCard(); } };
 </script>
