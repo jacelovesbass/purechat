@@ -1,0 +1,894 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Fennec</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #11161f;
+    font-family: "Avenir Next", "Segoe UI", Roboto, system-ui, sans-serif;
+    color: #3A2A18;
+    touch-action: none; user-select: none;
+  }
+  #wrap { position: relative; width: 100%; height: 100vh; height: 100dvh;
+          overflow: hidden; display: flex; flex-direction: column; }
+  #game { position: relative; flex: 1 1 auto; min-height: 0; }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  /* ---- HUD ---- */
+  #hud {
+    position: absolute; top: 0; left: 0; right: 0;
+    padding: 10px 14px 0; pointer-events: none;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    font-weight: 700; font-size: 15px;
+    text-shadow: 0 1px 0 rgba(255,255,255,.45);
+  }
+  #hearts { letter-spacing: 2px; font-size: 17px }
+  #right { text-align: right; line-height: 1.3 }
+  #lvl { font-size: 11px; font-weight: 600; opacity: .62; letter-spacing: .08em;
+         text-transform: uppercase }
+
+  /* ---- touch controls: their own bar, so a thumb never covers the fox ---- */
+  #pads {
+    display: none; flex: 0 0 auto;
+    height: 150px; padding: 14px 18px calc(14px + env(safe-area-inset-bottom));
+    background: #E8D6B4; border-top: 3px solid #8A6338;
+    justify-content: space-between; align-items: center;
+  }
+  body.touch #pads { display: flex }
+  .pad { display: flex; gap: 14px; align-items: center }
+  .btn {
+    width: 76px; height: 76px; border-radius: 50%;
+    background: #FBF0DE; border: 3px solid #8A6338;
+    display: grid; place-items: center;
+    font-size: 26px; font-weight: 800; color: #6B5231;
+    touch-action: none;
+  }
+  .btn.jump { width: 96px; height: 96px; font-size: 15px; letter-spacing: .04em;
+              background: #E8A563; color: #3A2A18 }
+  .btn.on { background: #D98C3C; color: #fff }
+
+  /* ---- cards ---- */
+  #card {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    padding: 24px; background: rgba(16,22,32,.72); backdrop-filter: blur(4px);
+    opacity: 0; pointer-events: none; transition: opacity .18s;
+  }
+  #card.on { opacity: 1; pointer-events: auto }
+  .inner {
+    width: 100%; max-width: 420px; max-height: 100%; overflow-y: auto;
+    background: #FBF0DE; border: 3px solid #8A6338; border-radius: 18px;
+    padding: 22px 22px 20px; text-align: center;
+    box-shadow: 0 18px 50px rgba(0,0,0,.45);
+  }
+  .inner h1 { margin: 0 0 2px; font-size: 27px; letter-spacing: -.01em }
+  .inner h2 { margin: 0 0 10px; font-size: 20px }
+  .inner p { margin: 0 0 14px; font-size: 14.5px; line-height: 1.5; color: #6B5231 }
+  .inner p.lead { color: #3A2A18 }
+  .keys { display: flex; flex-direction: column; gap: 7px; margin: 0 0 16px;
+          font-size: 13.5px; text-align: left }
+  .keys div { display: flex; justify-content: space-between; gap: 12px;
+              border-bottom: 1px dashed #E0C9A4; padding-bottom: 6px }
+  .keys b { font-weight: 700; color: #3A2A18 }
+  .keys span { color: #6B5231; text-align: right }
+  .tally { display: flex; justify-content: space-between; font-size: 14px;
+           padding: 5px 0; border-bottom: 1px dashed #E0C9A4 }
+  .tally.tot { border: 0; font-weight: 800; font-size: 17px; padding-top: 9px }
+  .go {
+    display: block; width: 100%; margin-top: 14px; padding: 14px;
+    font: inherit; font-size: 16px; font-weight: 800; letter-spacing: .02em;
+    background: #E8A563; color: #3A2A18;
+    border: 2px solid #8A6338; border-radius: 12px; cursor: pointer;
+  }
+  .go:active { transform: translateY(1px) }
+  .go.ghost { background: transparent; margin-top: 8px; font-size: 14px;
+              font-weight: 600; padding: 10px }
+  .sent { margin-top: 12px; font-size: 12.5px; color: #8A7250; min-height: 16px }
+</style>
+
+<div id="wrap">
+  <div id="game">
+    <canvas id="cv"></canvas>
+    <div id="hud">
+      <div id="hearts"></div>
+      <div id="right"><div id="dates"></div><div id="lvl"></div></div>
+    </div>
+  </div>
+  <div id="pads">
+    <div class="pad">
+      <div class="btn" id="bL">&#9664;</div>
+      <div class="btn" id="bR">&#9654;</div>
+    </div>
+    <div class="pad">
+      <div class="btn jump" id="bJ">JUMP</div>
+    </div>
+  </div>
+  <div id="card"><div class="inner" id="inner"></div></div>
+</div>
+
+<script>
+"use strict";
+/* ============================================================
+   Fennec
+   A side scroller for Pure Chat. One file, no network, no storage.
+   The fox is drawn from a parametric rig rather than a sprite sheet:
+   one geometry definition, every pose is a set of joint angles.
+   ============================================================ */
+
+/* ---------- the fox: colours and geometry ---------- */
+const C = {
+  sand:'#F2CE9B', sandDk:'#DCAC72', cream:'#FBF0DE', creamDk:'#EFDDC2',
+  ear:'#F6CFC6', earDk:'#E0B7AE', patch:'#E8A563', ink:'#8A6338',
+  nose:'#2E2622', eye:'#46281A'
+};
+// Path2D parses SVG path data, so the rig geometry is the single source
+// whether it is drawn to canvas here or to SVG in the mockup.
+const G = {
+  earOut:  new Path2D('M -9 3 Q -9 -17 -2 -34 Q 0 -39 3 -35 Q 10 -18 9 2 Q 0 6 -9 3 Z'),
+  earIn:   new Path2D('M -5 0 Q -5 -15 -0.5 -28 Q 0.5 -31 2 -28 Q 6.5 -15 5.5 0 Q 0 3 -5 0 Z'),
+  tail:    new Path2D('M 0 -4 Q -17 5 -29 -4 Q -38 -12 -33 -21'),
+  muzzle:  new Path2D('M -4 4 q 3 -8 12 -7 q 10 1 12 8 q 2 8.5 -6.5 11 q -12 3.5 -17 -2.5 q -2.5 -4 -.5 -9.5 Z'),
+  patch:   new Path2D('M 9 -5.8 q 7 3 7.3 9 q .3 5.5 -4.7 6 q -5 -7.5 -2.6 -15 Z'),
+  chest:   new Path2D('M -13 7 q 13 8 27 -2 q -2 10 -14 10 q -12 0 -13 -8 Z'),
+  mouth:   new Path2D('M 15.8 7.8 q 0 3.4 -4 3.6'),
+  lash:    new Path2D('M 3.4 -8.6 q 4.4 -2.4 8.2 .4'),
+  blink:   new Path2D('M 2 -3 q 5 4 10 0'),
+  squint:  new Path2D('M 2 -2 q 5 -5 10 0')
+};
+
+function roundRect(x, y, w, h, r){
+  const p = new Path2D();
+  p.moveTo(x + r, y);
+  p.arcTo(x + w, y,     x + w, y + h, r);
+  p.arcTo(x + w, y + h, x,     y + h, r);
+  p.arcTo(x,     y + h, x,     y,     r);
+  p.arcTo(x,     y,     x + w, y,     r);
+  p.closePath();
+  return p;
+}
+const LEG  = roundRect(-4.5, 0, 9, 17, 4.5);
+const PAW  = roundRect(-4.5, 10, 9, 7, 3.5);
+
+function fillStroke(x, path, fill, lw){
+  x.fillStyle = fill; x.fill(path);
+  if (lw){ x.lineWidth = lw; x.strokeStyle = C.ink; x.stroke(path); }
+}
+
+function drawLeg(x, px, py, ang, far){
+  x.save(); x.translate(px, py); x.rotate(ang * Math.PI / 180);
+  fillStroke(x, LEG, far ? C.sandDk : C.sand, 2);
+  fillStroke(x, PAW, far ? C.creamDk : C.cream, 2);
+  x.restore();
+}
+
+function drawEar(x, tilt, far){
+  x.save(); x.rotate(tilt * Math.PI / 180);
+  fillStroke(x, G.earOut, far ? C.sandDk : C.sand, 2);
+  x.fillStyle = far ? C.earDk : C.ear; x.fill(G.earIn);
+  x.restore();
+}
+
+function drawTail(x, ang){
+  x.save(); x.translate(-15, -25); x.rotate(ang * Math.PI / 180);
+  x.lineCap = 'round'; x.lineJoin = 'round';
+  // an ink pass, then sand over it: keeps the fluff even at any angle
+  x.strokeStyle = C.ink; x.lineWidth = 21; x.stroke(G.tail);
+  x.fillStyle = C.ink;
+  x.beginPath(); x.arc(-33, -21, 11, 0, 7); x.fill();
+  x.strokeStyle = C.sand; x.lineWidth = 17; x.stroke(G.tail);
+  x.fillStyle = C.cream;
+  x.beginPath(); x.arc(-33, -21, 9, 0, 7); x.fill();
+  x.restore();
+}
+
+function drawHead(x, p){
+  x.save();
+  x.translate(14, -41 + p.headY); x.rotate(p.headRot * Math.PI / 180);
+
+  x.save(); x.translate(-10, -10); drawEar(x, -28 + p.earL, true); x.restore();
+
+  x.beginPath(); x.arc(0, 0, 14, 0, 7);
+  x.fillStyle = C.sand; x.fill();
+  x.lineWidth = 2; x.strokeStyle = C.ink; x.stroke();
+
+  fillStroke(x, G.muzzle, C.cream, 2);
+  x.fillStyle = C.patch; x.fill(G.patch);
+
+  x.fillStyle = C.nose;
+  x.beginPath(); x.ellipse(15.8, 4.8, 4, 3.2, 0, 0, 7); x.fill();
+  x.strokeStyle = C.nose; x.lineWidth = 1.7; x.stroke(G.mouth);
+
+  if (p.eye === 'blink' || p.eye === 'squint'){
+    x.strokeStyle = C.eye; x.lineWidth = p.eye === 'blink' ? 2.4 : 2.6;
+    x.stroke(p.eye === 'blink' ? G.blink : G.squint);
+  } else {
+    x.fillStyle = C.eye;
+    x.beginPath(); x.ellipse(6.8, -2.4, 4.7, 5.2, 0, 0, 7); x.fill();
+    x.fillStyle = '#fff';
+    x.beginPath(); x.arc(8.5, -4.6, 1.8, 0, 7); x.fill();
+    x.globalAlpha = .7;
+    x.beginPath(); x.arc(5.1, -0.1, 1, 0, 7); x.fill();
+    x.globalAlpha = 1;
+    x.strokeStyle = C.ink; x.lineWidth = 1.7; x.stroke(G.lash);
+  }
+
+  x.save(); x.translate(1, -12); drawEar(x, -11 + p.earR, false); x.restore();
+  x.restore();
+}
+
+const IDLE = { bodyY:0, bodyRot:0, headY:0, headRot:0, legs:[0,0,0,0],
+               tail:0, earL:0, earR:0, eye:'open', squash:1 };
+const pose = o => Object.assign({}, IDLE, o);
+
+function drawFennec(x, p){
+  const sy = p.squash, sx = 1 / Math.sqrt(sy);
+  x.save();
+  x.lineJoin = 'round'; x.lineCap = 'butt';
+  x.scale(sx, sy);
+
+  drawTail(x, p.tail);
+  drawLeg(x, -13, -16 + p.bodyY, p.legs[0], true);
+  drawLeg(x,   6, -16 + p.bodyY, p.legs[2], true);
+
+  x.save();
+  x.translate(-3, -24 + p.bodyY); x.rotate(p.bodyRot * Math.PI / 180);
+  x.beginPath(); x.ellipse(0, 0, 17, 13, 0, 0, 7);
+  x.fillStyle = C.sand; x.fill();
+  x.lineWidth = 2; x.strokeStyle = C.ink; x.stroke();
+  x.fillStyle = C.cream; x.fill(G.chest);
+  x.restore();
+
+  drawLeg(x, -10, -16 + p.bodyY, p.legs[1], false);
+  drawLeg(x,   9, -16 + p.bodyY, p.legs[3], false);
+  drawHead(x, p);
+  x.restore();
+}
+
+/* ---------- poses ---------- */
+const RUN = [
+  pose({legs:[ 26,-30,-24, 32], bodyY:-2, bodyRot:-3, tail:-14, earL:-10, earR:-12, headY:-1}),
+  pose({legs:[  6, -8, -4,  8], bodyY: 1, bodyRot: 2, tail:  4, earL:  6, earR:  8}),
+  pose({legs:[-30, 26, 32,-24], bodyY:-2, bodyRot:-3, tail: 14, earL: -8, earR:-10, headY:-1}),
+  pose({legs:[ -8,  6,  8, -4], bodyY: 1, bodyRot: 2, tail: -4, earL:  5, earR:  7})
+];
+const P_JUMP  = pose({legs:[-34,-28,-40,-46], bodyY:-3, bodyRot:-10, tail:-26,
+                      earL:-22, earR:-26, headY:-2, squash:1.06});
+const P_FALL  = pose({legs:[22,16,30,36], bodyY:-1, bodyRot:8, tail:20,
+                      earL:16, earR:20, eye:'squint', squash:0.94});
+// the glide: ears thrown wide, which is the whole point of a fennec
+const P_GLIDE = pose({legs:[14,10,20,24], bodyY:-2, bodyRot:4, tail:-8,
+                      earL:-46, earR:34, headY:-1, squash:0.97});
+const P_CROUCH= pose({bodyY:8, squash:0.8, tail:8, earL:14, earR:18, headY:7, eye:'squint'});
+const P_HURT  = pose({bodyRot:-14, legs:[-18,-12,14,20], tail:-30, earL:24, earR:28,
+                      eye:'blink', headRot:-10});
+const IDLE_CYCLE = [pose({}), pose({bodyY:1, squash:.975, earL:2, earR:3, headY:1}),
+                    pose({bodyY:1, squash:.975, earL:3, earR:4, headY:1}), pose({eye:'blink'})];
+
+/* ============================================================
+   Levels
+   ============================================================ */
+const GY = 300;                        // ground top, world units
+const row = (x, y, n, gap) => { const a = []; for (let i = 0; i < n; i++) a.push({x:x+i*(gap||26), y:y}); return a; };
+
+const LEVELS = [
+  {
+    name: 'Dune Steps', w: 2650, den: 2520,
+    sky: ['#8FD8EE', '#FBE7C7'], hillA: '#E8CFA2', hillB: '#D9B885',
+    dirt: '#C98A52', crust: '#E0A96B',
+    ground: [[0, 900], [985, 1700], [1800, 2650]],
+    plats: [ {x:300,y:238,w:120}, {x:480,y:188,w:100}, {x:665,y:238,w:110},
+             {x:1055,y:230,w:140}, {x:1255,y:178,w:110}, {x:1455,y:235,w:120},
+             {x:1880,y:228,w:130}, {x:2085,y:182,w:110}, {x:2265,y:240,w:120} ],
+    spikes: [ {x:760, w:54} ],
+    scorps: [ {x:560, a:470, b:690}, {x:1500, a:1420, b:1640} ],
+    dates: [].concat(
+      row(318, 206, 4), row(498, 156, 3), row(690, 206, 3),
+      row(915, 240, 3, 24), row(1075, 198, 4), row(1272, 146, 3),
+      row(1720, 244, 3, 26), row(1900, 196, 4), row(2102, 150, 3), row(2285, 208, 3))
+  },
+  {
+    name: 'The Wadi', w: 3100, den: 2970,
+    sky: ['#79C6E6', '#F3DDBE'], hillA: '#DDC79C', hillB: '#C9A974',
+    dirt: '#BE7C45', crust: '#D89A5C',
+    ground: [[0, 520], [610, 1080], [1180, 1560], [1680, 2240], [2345, 3100]],
+    plats: [ {x:300,y:228,w:100}, {x:640,y:200,w:90}, {x:820,y:155,w:90},
+             {x:1000,y:210,w:110}, {x:1215,y:168,w:100}, {x:1400,y:222,w:120},
+             {x:1700,y:190,w:100}, {x:1880,y:145,w:110}, {x:2060,y:205,w:120},
+             {x:2380,y:230,w:110}, {x:2560,y:180,w:120}, {x:2760,y:232,w:120} ],
+    spikes: [ {x:430, w:60}, {x:1460, w:54}, {x:2160, w:60} ],
+    scorps: [ {x:340, a:290, b:420}, {x:1030, a:985, b:1120},
+              {x:1930, a:1870, b:2000}, {x:2600, a:2545, b:2690} ],
+    dates: [].concat(
+      row(315, 196, 3), row(655, 168, 3), row(838, 123, 3),
+      row(1018, 178, 4), row(1232, 136, 3), row(1418, 190, 4),
+      row(1600, 250, 3, 24), row(1715, 158, 3), row(1898, 113, 4),
+      row(2078, 173, 4), row(2270, 248, 3, 24), row(2398, 198, 3),
+      row(2578, 148, 4), row(2778, 200, 3))
+  },
+  {
+    name: 'Night Run', w: 3500, den: 3380,
+    sky: ['#2E3F66', '#6E5B86'], hillA: '#4A4166', hillB: '#372F4F',
+    dirt: '#4A3A52', crust: '#6B5570', night: true,
+    ground: [[0, 480], [580, 980], [1090, 1420], [1540, 1900], [2010, 2520], [2640, 3500]],
+    plats: [ {x:250,y:222,w:90}, {x:600,y:190,w:80}, {x:770,y:140,w:80},
+             {x:940,y:196,w:90}, {x:1120,y:232,w:90}, {x:1290,y:175,w:90},
+             {x:1460,y:130,w:85}, {x:1620,y:195,w:90}, {x:1800,y:240,w:90},
+             {x:1960,y:180,w:95}, {x:2140,y:132,w:95}, {x:2330,y:198,w:100},
+             {x:2560,y:235,w:100}, {x:2740,y:180,w:100}, {x:2930,y:135,w:100},
+             {x:3140,y:205,w:110} ],
+    spikes: [ {x:360, w:54}, {x:1180, w:54}, {x:1700, w:60}, {x:2220, w:60}, {x:3020, w:54} ],
+    scorps: [ {x:290, a:255, b:330}, {x:965, a:940, b:1020},
+              {x:1655, a:1625, b:1700}, {x:2180, a:2140, b:2260},
+              {x:2790, a:2750, b:2830}, {x:3180, a:3145, b:3240} ],
+    dates: [].concat(
+      row(262, 190, 3), row(615, 158, 3), row(785, 108, 3), row(955, 164, 3),
+      row(1135, 200, 3), row(1305, 143, 3), row(1472, 98, 3), row(1635, 163, 3),
+      row(1815, 208, 3), row(1975, 148, 3), row(2155, 100, 3), row(2345, 166, 3),
+      row(2450, 250, 4, 24), row(2575, 203, 3), row(2755, 148, 3),
+      row(2945, 103, 3), row(3155, 173, 4))
+  }
+];
+
+/* ============================================================
+   Engine
+   ============================================================ */
+const cv = document.getElementById('cv');
+const x  = cv.getContext('2d');
+const WH = 360;                        // nominal world height; ground sits at 300
+// A chat game is played in portrait on a phone and in landscape on a laptop, and a
+// fixed world height ruins one of them. Guarantee a minimum of both dimensions and
+// anchor the world to the bottom of the screen, so a tall screen just shows more sky.
+const MINW = 320, MINH = 300;
+let VW = 640, VH = 360, yOff = 0, scale = 1;
+
+function resize(){
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return;
+  const dpr = Math.min(devicePixelRatio || 1, 2.5);
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  scale = Math.min((w * dpr) / MINW, (h * dpr) / MINH);
+  VW = (w * dpr) / scale;
+  VH = (h * dpr) / scale;
+  yOff = VH - WH;                      // world y=WH lands on the bottom edge
+}
+addEventListener('resize', resize);
+addEventListener('orientationchange', resize);
+if (window.ResizeObserver) new ResizeObserver(resize).observe(cv);
+
+const fox = { x:60, y:GY, vx:0, vy:0, dir:1, onGround:true, f:0, step:0,
+              hearts:3, inv:0, gliding:false, coyote:0, buffer:0 };
+let lv = 0, L = LEVELS[0], dates = 0, total = 0, runDates = 0;
+let state = 'title';                   // title | play | dead | clear | done
+let cam = 0, t = 0, deathY = 0;
+let scorps = [], pickups = [], parts = [];
+let hostName = '';
+
+function loadLevel(i){
+  lv = i; L = LEVELS[i];
+  fox.x = 60; fox.y = GY; fox.vx = 0; fox.vy = 0; fox.dir = 1;
+  fox.inv = 0; fox.gliding = false; fox.coyote = 0; fox.buffer = 0;
+  dates = 0; cam = 0;
+  scorps  = L.scorps.map(s => ({ x:s.x, a:s.a, b:s.b, dir:1, y:GY, alive:true, w:11 }));
+  pickups = L.dates.map(d => ({ x:d.x, y:d.y, got:false }));
+  parts = [];
+  // a scorpion stands on whatever is under it at spawn
+  scorps.forEach(s => { s.y = surfaceAt(s.x); });
+}
+
+function groundAt(px){
+  for (const g of L.ground) if (px >= g[0] && px <= g[1]) return GY;
+  return null;                          // a pit
+}
+function surfaceAt(px){
+  for (const p of L.plats) if (px >= p.x && px <= p.x + p.w) return p.y;
+  return groundAt(px) === null ? GY : GY;
+}
+
+/* ---------- input ---------- */
+const keys = {};
+const held = { L:false, R:false, J:false };
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (!keys[k] && (k === ' ' || k === 'arrowup' || k === 'w')) fox.buffer = 8;
+  keys[k] = true;
+  if ([' ','arrowup','arrowdown','arrowleft','arrowright'].indexOf(k) >= 0) e.preventDefault();
+  if (state !== 'play' && (k === ' ' || k === 'enter')) { e.preventDefault(); advance(); }
+});
+addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+function bindBtn(el, set){
+  const on  = e => { e.preventDefault(); e.stopPropagation(); set(true);  el.classList.add('on'); };
+  const off = e => { e.preventDefault(); e.stopPropagation(); set(false); el.classList.remove('on'); };
+  el.addEventListener('pointerdown', on);
+  el.addEventListener('pointerup', off);
+  el.addEventListener('pointercancel', off);
+  el.addEventListener('pointerleave', off);
+}
+bindBtn(document.getElementById('bL'), v => held.L = v);
+bindBtn(document.getElementById('bR'), v => held.R = v);
+bindBtn(document.getElementById('bJ'), v => { if (v && !held.J) fox.buffer = 8; held.J = v; });
+// Show the control bar only where there is no mouse. "pointer: coarse" alone is true
+// in a good few desktop browsers, which costs a laptop player a third of the screen.
+if (matchMedia('(hover: none) and (pointer: coarse)').matches ||
+    (navigator.maxTouchPoints > 0 && !matchMedia('(hover: hover)').matches))
+  document.body.classList.add('touch');
+resize();   // the bar changes the canvas height, so measure after adding it
+
+const wantL = () => held.L || keys['arrowleft']  || keys['a'];
+const wantR = () => held.R || keys['arrowright'] || keys['d'];
+const wantJ = () => held.J || keys[' '] || keys['arrowup'] || keys['w'];
+
+/* ---------- physics ---------- */
+const GRAV = 0.56, RUNV = 3.25, JUMPV = -10.4, GLIDE_VY = 1.7, TERM = 15;
+
+function hurt(from){
+  if (fox.inv > 0) return;
+  fox.hearts--; fox.inv = 100;
+  fox.vy = -5.4;
+  fox.vx = (from !== undefined && from > fox.x ? -1 : 1) * 3.4;
+  burst(fox.x, fox.y - 28, '#D96A52', 9);
+  if (fox.hearts <= 0) endRun(false);
+}
+
+function burst(px, py, col, n){
+  for (let i = 0; i < n; i++)
+    parts.push({ x:px, y:py, vx:(Math.random()-.5)*4, vy:-Math.random()*3.4-.6,
+                 life:30+Math.random()*18, col:col, r:1.6+Math.random()*2.2 });
+}
+
+function step(dt){
+  t += dt;
+  if (state !== 'play'){ parts.forEach(p => p.life -= dt); return; }
+
+  const want = (wantR() ? 1 : 0) - (wantL() ? 1 : 0);
+  fox.vx += (want * RUNV - fox.vx) * (fox.onGround ? 0.24 : 0.1) * Math.min(dt, 2);
+  if (Math.abs(fox.vx) < 0.05) fox.vx = 0;
+  if (want) fox.dir = want;
+
+  if (fox.coyote > 0) fox.coyote -= dt;
+  if (fox.buffer > 0) fox.buffer -= dt;
+  if (fox.buffer > 0 && fox.coyote > 0){
+    fox.vy = JUMPV; fox.onGround = false; fox.coyote = 0; fox.buffer = 0;
+    burst(fox.x, fox.y - 2, '#E8D2A8', 5);
+  }
+
+  // the ear glide: hold jump on the way down and the fall slows right off
+  fox.gliding = !fox.onGround && fox.vy > 0.6 && wantJ();
+  fox.vy = fox.gliding ? Math.min(fox.vy + GRAV * dt, GLIDE_VY)
+                       : Math.min(fox.vy + GRAV * dt, TERM);
+
+  fox.x = Math.max(16, Math.min(L.w - 16, fox.x + fox.vx * dt));
+  const prevY = fox.y;
+  fox.y += fox.vy * dt;
+  const wasGround = fox.onGround;
+  fox.onGround = false;
+
+  const g = groundAt(fox.x);
+  if (g !== null && fox.y >= g && prevY <= g + 14){ fox.y = g; fox.vy = 0; fox.onGround = true; }
+  for (const p of L.plats){
+    if (fox.vy >= 0 && prevY <= p.y + 1 && fox.y >= p.y &&
+        fox.x > p.x - 12 && fox.x < p.x + p.w + 12){
+      fox.y = p.y; fox.vy = 0; fox.onGround = true;
+    }
+  }
+  if (fox.onGround && !wasGround) fox.coyote = 6;
+  else if (fox.onGround) fox.coyote = 6;
+
+  if (fox.y > WH + 90){ fox.hearts = 0; endRun(false); return; }   // down a pit
+
+  if (fox.inv > 0) fox.inv -= dt;
+
+  // spikes
+  for (const s of L.spikes)
+    if (fox.y >= GY - 4 && fox.x > s.x - 8 && fox.x < s.x + s.w + 8) hurt(s.x + s.w / 2);
+
+  // scorpions: stomp from above, hurt from the side
+  for (const s of scorps){
+    if (!s.alive) continue;
+    s.x += s.dir * 0.72 * dt;
+    if (s.x < s.a){ s.x = s.a; s.dir = 1; }
+    if (s.x > s.b){ s.x = s.b; s.dir = -1; }
+    const dx = Math.abs(s.x - fox.x), dy = fox.y - s.y;
+    if (dx < 20 && dy > -34 && dy < 10){
+      if (fox.vy > 1.2 && prevY < s.y - 12){
+        s.alive = false; fox.vy = -7.6; fox.buffer = 0;
+        burst(s.x, s.y - 8, '#8C4A3A', 12);
+        runDates += 2;
+      } else hurt(s.x);
+    }
+  }
+
+  // dates
+  for (const p of pickups){
+    if (p.got) continue;
+    if (Math.abs(p.x - fox.x) < 19 && Math.abs(p.y - (fox.y - 26)) < 26){
+      p.got = true; dates++; runDates++;
+      burst(p.x, p.y, '#E8A563', 6);
+    }
+  }
+
+  // the den
+  if (fox.x > L.den && fox.y >= GY - 6) endRun(true);
+
+  fox.step += dt * Math.abs(fox.vx);
+  if (fox.step > 3.1){ fox.step = 0; fox.f = (fox.f + 1) % 4; }
+
+  parts.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 0.17 * dt; p.life -= dt; });
+  if (parts.length > 160) parts.splice(0, parts.length - 160);
+
+  const target = fox.x - VW * 0.4;
+  cam += (Math.max(0, Math.min(L.w - VW, target)) - cam) * Math.min(0.12 * dt, 1);
+}
+
+function currentPose(){
+  if (fox.inv > 60) return P_HURT;
+  if (!fox.onGround){
+    if (fox.gliding) return P_GLIDE;
+    return fox.vy < 0 ? P_JUMP : P_FALL;
+  }
+  if (Math.abs(fox.vx) > 0.3) return RUN[fox.f & 3];
+  return IDLE_CYCLE[((Math.floor(t / 24) % 4) + 4) % 4];   // never index backwards
+}
+
+/* ============================================================
+   Drawing
+   ============================================================ */
+function hills(off, col, baseY, amp, stepW){
+  x.fillStyle = col;
+  x.beginPath();
+  const shift = -(off % (stepW * 2));
+  x.moveTo(shift - stepW * 2, WH);
+  x.lineTo(shift - stepW * 2, baseY);
+  for (let px = shift - stepW * 2; px < VW + stepW * 2; px += stepW)
+    x.quadraticCurveTo(px + stepW / 2, baseY - amp, px + stepW, baseY);
+  x.lineTo(VW + stepW * 2, WH); x.closePath(); x.fill();
+}
+
+function drawScorpion(s){
+  const SH = '#6E3A2C', BODY = '#A4553F', LIT = '#C27257', EDGE = '#3E1D16';
+  const wob = Math.sin(t / 9 + s.x) * 1.4;
+  x.save(); x.translate(s.x - cam, s.y); x.scale(s.dir, 1);
+  x.lineJoin = 'round'; x.lineCap = 'round';
+
+  // legs, behind everything
+  x.strokeStyle = EDGE; x.lineWidth = 1.9;
+  for (let i = -1; i <= 1; i++){
+    x.beginPath(); x.moveTo(i * 5 - 1, -6);
+    x.lineTo(i * 5 - 5, -1); x.stroke();
+    x.beginPath(); x.moveTo(i * 5 + 1, -6);
+    x.lineTo(i * 5 + 4, -1); x.stroke();
+  }
+
+  // tail: segments up and over, stinger on the end
+  x.strokeStyle = EDGE; x.lineWidth = 7.5;
+  x.beginPath(); x.moveTo(-7, -8);
+  x.quadraticCurveTo(-19, -9 + wob, -17, -21 + wob); x.stroke();
+  x.strokeStyle = BODY; x.lineWidth = 5;
+  x.beginPath(); x.moveTo(-7, -8);
+  x.quadraticCurveTo(-19, -9 + wob, -17, -21 + wob); x.stroke();
+  x.fillStyle = '#F3DCA8'; x.strokeStyle = EDGE; x.lineWidth = 1.6;
+  x.beginPath();
+  x.moveTo(-19.5, -21 + wob); x.lineTo(-13.5, -23 + wob); x.lineTo(-17, -28 + wob);
+  x.closePath(); x.fill(); x.stroke();
+
+  // body
+  x.fillStyle = BODY; x.strokeStyle = EDGE; x.lineWidth = 2;
+  x.beginPath(); x.ellipse(-1, -7, 10.5, 6.6, 0, 0, 7); x.fill(); x.stroke();
+  x.fillStyle = SH;
+  x.beginPath(); x.ellipse(-1, -4.6, 9, 3, 0, 0, 7); x.fill();
+  x.strokeStyle = SH; x.lineWidth = 1.4;
+  for (const sx2 of [-6, -1, 4]){
+    x.beginPath(); x.moveTo(sx2, -12.4); x.lineTo(sx2, -2.6); x.stroke();
+  }
+
+  // head and pincers, out in front where they read
+  x.fillStyle = BODY; x.strokeStyle = EDGE; x.lineWidth = 2;
+  x.beginPath(); x.ellipse(9, -7, 5, 4.4, 0, 0, 7); x.fill(); x.stroke();
+  for (const sgn of [-1, 1]){
+    x.save(); x.translate(13, -7 + sgn * 3.2); x.rotate(sgn * 0.3 + wob * 0.05);
+    x.fillStyle = LIT;
+    x.beginPath(); x.ellipse(3.4, 0, 5.2, 3, 0, 0, 7); x.fill(); x.stroke();
+    x.strokeStyle = EDGE; x.lineWidth = 1.5;
+    x.beginPath(); x.moveTo(1.5, 0); x.lineTo(8, 0); x.stroke();
+    x.strokeStyle = EDGE; x.lineWidth = 2;
+    x.restore();
+  }
+
+  x.fillStyle = '#FFE08A';
+  x.beginPath(); x.arc(9, -9.4, 1.6, 0, 7); x.fill();
+  x.restore();
+}
+
+function drawDate(p, i){
+  if (p.got) return;
+  const py = p.y + Math.sin(t / 22 + i) * 2.4;
+  x.save(); x.translate(p.x - cam, py);
+  x.fillStyle = '#B4742F';
+  x.beginPath(); x.ellipse(0, 0, 6.2, 8, 0, 0, 7); x.fill();
+  x.fillStyle = '#E8A563';
+  x.beginPath(); x.ellipse(-0.6, -0.8, 4.6, 6.2, 0, 0, 7); x.fill();
+  x.fillStyle = 'rgba(255,255,255,.65)';
+  x.beginPath(); x.ellipse(-1.8, -3, 1.3, 2, -.4, 0, 7); x.fill();
+  x.strokeStyle = '#6B5231'; x.lineWidth = 1.4; x.lineCap = 'round';
+  x.beginPath(); x.moveTo(0, -7.6); x.lineTo(1.6, -10.4); x.stroke();
+  x.restore();
+}
+
+function drawDen(){
+  const dx = L.den - cam;
+  if (dx < -90 || dx > VW + 90) return;
+  x.save(); x.translate(dx, GY);
+  x.fillStyle = L.night ? '#2B2338' : '#9A6435';
+  x.beginPath(); x.moveTo(-34, 0);
+  x.quadraticCurveTo(-34, -56, 0, -56);
+  x.quadraticCurveTo(34, -56, 34, 0);
+  x.closePath(); x.fill();
+  x.fillStyle = L.night ? '#141020' : '#4A2E17';
+  x.beginPath(); x.moveTo(-23, 0);
+  x.quadraticCurveTo(-23, -42, 0, -42);
+  x.quadraticCurveTo(23, -42, 23, 0);
+  x.closePath(); x.fill();
+  x.fillStyle = L.night ? '#F6E3A8' : '#FFD98A';
+  x.globalAlpha = .55 + Math.sin(t / 30) * .12;
+  x.beginPath(); x.ellipse(0, -16, 12, 13, 0, 0, 7); x.fill();
+  x.globalAlpha = 1;
+  x.restore();
+}
+
+function render(){
+  x.setTransform(scale, 0, 0, scale, 0, yOff * scale);
+  x.clearRect(0, -yOff, VW, VH);
+
+  const top = -yOff;                       // world y of the top of the screen
+  const sky = x.createLinearGradient(0, top, 0, WH);
+  sky.addColorStop(0, L.sky[0]); sky.addColorStop(1, L.sky[1]);
+  x.fillStyle = sky; x.fillRect(0, top, VW, VH);
+
+  if (L.night){
+    x.fillStyle = '#FFF8D8';
+    for (let i = 0; i < 40; i++){
+      const sx2 = (i * 137.5) % VW, sy2 = top + (i * 53.7) % Math.max(60, 200 + yOff);
+      x.globalAlpha = .35 + ((i * 37) % 10) / 16;
+      x.fillRect(sx2, sy2, 1.8, 1.8);
+    }
+    x.globalAlpha = 1;
+    x.fillStyle = '#FFF4D0';
+    x.beginPath(); x.arc(VW - 72, top + 56, 22, 0, 7); x.fill();
+    x.fillStyle = L.sky[0];
+    x.beginPath(); x.arc(VW - 81, top + 49, 20, 0, 7); x.fill();
+  } else {
+    x.fillStyle = 'rgba(255,255,255,.9)';
+    for (const c of [[90,54,20],[116,58,15],[VW-120,44,17],[VW-96,48,13]]){
+      x.beginPath(); x.arc(c[0] - (cam * .08) % (VW + 300), top + c[1], c[2], 0, 7); x.fill();
+    }
+  }
+
+  hills(cam * 0.25, L.hillA, 196, 58, 180);
+  hills(cam * 0.52, L.hillB, 228, 48, 136);
+
+  drawDen();
+
+  // the void first, so a pit reads as a hole rather than as more scenery
+  x.fillStyle = L.night ? '#0E0A18' : '#6B4526';
+  x.fillRect(0, GY, VW, WH - GY + 20);
+
+  // ground segments
+  for (const g of L.ground){
+    const gx = g[0] - cam, gw = g[1] - g[0];
+    if (gx > VW || gx + gw < 0) continue;
+    x.fillStyle = L.dirt; x.fillRect(gx, GY, gw, WH - GY + 20);
+    x.fillStyle = L.crust; x.fillRect(gx, GY, gw, 9);
+    // pebbles, so a long stretch of ground is not a flat slab
+    x.fillStyle = 'rgba(0,0,0,.09)';
+    const from = Math.max(g[0], cam - 40), to = Math.min(g[1], cam + VW + 40);
+    for (let px = Math.ceil(from / 47) * 47; px < to; px += 47){
+      const h = 2 + (px % 3);
+      x.fillRect(px - cam, GY + 16 + (px % 23), h * 2.4, h);
+    }
+  }
+
+  // platforms
+  for (const p of L.plats){
+    const px = p.x - cam;
+    if (px > VW || px + p.w < 0) continue;
+    x.fillStyle = L.dirt;
+    x.beginPath(); x.roundRect ? x.roundRect(px, p.y, p.w, 17, 5) : x.rect(px, p.y, p.w, 17);
+    x.fill();
+    x.strokeStyle = 'rgba(74,46,23,.55)'; x.lineWidth = 2; x.stroke();
+    x.fillStyle = L.crust;
+    for (let i = 0; i < Math.round(p.w / 30); i++) x.fillRect(px + 5 + i * 30, p.y + 4, 21, 6);
+  }
+
+  // spines: pale and needle-thin, so they read as sharp rather than as shrubbery
+  for (const s of L.spikes){
+    const sx2 = s.x - cam;
+    if (sx2 > VW || sx2 + s.w < 0) continue;
+    const n = Math.round(s.w / 9);
+    const step = s.w / n;
+    x.fillStyle = L.night ? '#CFC6E0' : '#F3EBD8';
+    x.strokeStyle = L.night ? '#2B2338' : '#6B5231';
+    x.lineWidth = 1.6; x.lineJoin = 'miter';
+    for (let i = 0; i < n; i++){
+      const bx = sx2 + i * step, tall = 20 + (i % 2) * 5;
+      x.beginPath();
+      x.moveTo(bx, GY + 1);
+      x.lineTo(bx + step / 2, GY - tall);
+      x.lineTo(bx + step, GY + 1);
+      x.closePath(); x.fill(); x.stroke();
+    }
+    x.lineJoin = 'round';
+  }
+
+  pickups.forEach(drawDate);
+  scorps.forEach(s => { if (s.alive) drawScorpion(s); });
+
+  for (const p of parts){
+    if (p.life <= 0) continue;
+    x.globalAlpha = Math.max(0, Math.min(1, p.life / 26));
+    x.fillStyle = p.col;
+    x.beginPath(); x.arc(p.x - cam, p.y, p.r, 0, 7); x.fill();
+  }
+  x.globalAlpha = 1;
+
+  // the fox
+  if (!(fox.inv > 0 && Math.floor(t / 4) % 2)){
+    x.save();
+    x.translate(fox.x - cam, fox.y);
+    x.globalAlpha = .17; x.fillStyle = '#000';
+    x.beginPath(); x.ellipse(0, 2, 20, 4.2, 0, 0, 7); x.fill();
+    x.globalAlpha = 1;
+    x.scale(fox.dir * 0.82, 0.82);
+    drawFennec(x, currentPose());
+    x.restore();
+  }
+}
+
+/* ============================================================
+   Cards, score, flow
+   ============================================================ */
+const card = document.getElementById('card'), inner = document.getElementById('inner');
+const elHearts = document.getElementById('hearts'), elDates = document.getElementById('dates'),
+      elLvl = document.getElementById('lvl');
+
+function showCard(html){ inner.innerHTML = html; card.classList.add('on'); }
+function hideCard(){ card.classList.remove('on'); }
+
+function hud(){
+  elHearts.textContent = '♥ '.repeat(Math.max(0, fox.hearts)).trim() || '·';
+  elDates.textContent  = '• ' + dates + ' / ' + pickups.length;
+  elLvl.textContent    = (lv + 1) + ' — ' + L.name;
+}
+
+function postScore(score, detail){
+  if (window.parent !== window)
+    parent.postMessage({ type:'score', score: score, detail: detail }, '*');
+}
+
+function endRun(cleared){
+  if (state !== 'play') return;
+  if (cleared){
+    total += dates;
+    if (lv === LEVELS.length - 1){ state = 'done'; finalCard(true); }
+    else { state = 'clear'; clearCard(); }
+  } else {
+    state = 'dead';
+    deathCard();
+  }
+}
+
+function titleCard(){
+  state = 'title';
+  showCard(
+    '<h1>Fennec</h1>' +
+    '<p class="lead">' + (hostName ? hostName + ', the ' : 'The ') +
+      'dates are scattered across three stretches of desert and the den is at the far end ' +
+      'of each. Scorpions can be jumped on. Spines cannot.</p>' +
+    '<div class="keys">' +
+      '<div><b>Run</b><span>Arrow keys, A / D, or the pads</span></div>' +
+      '<div><b>Jump</b><span>Space, Up, or JUMP</span></div>' +
+      '<div><b>Ear glide</b><span>Hold jump as you fall</span></div>' +
+      '<div><b>Scorpions</b><span>Land on one, worth 2 dates</span></div>' +
+      '<div><b>Hearts</b><span>Three, and a pit takes the lot</span></div>' +
+    '</div>' +
+    '<button class="go" id="start">Start running</button>');
+  document.getElementById('start').onclick = advance;
+}
+
+function clearCard(){
+  const bonus = fox.hearts * 15;
+  total += bonus;
+  showCard(
+    '<h2>' + L.name + ' cleared</h2>' +
+    '<p>The den was open. One stretch of desert down.</p>' +
+    '<div class="tally"><span>Dates</span><b>' + dates + '</b></div>' +
+    '<div class="tally"><span>Hearts left</span><b>' + fox.hearts + ' × 15</b></div>' +
+    '<div class="tally tot"><span>Running total</span><b>' + total + '</b></div>' +
+    '<button class="go" id="next">On to ' + LEVELS[lv + 1].name + '</button>');
+  document.getElementById('next').onclick = advance;
+}
+
+function deathCard(){
+  showCard(
+    '<h2>Out of hearts</h2>' +
+    '<p>The desert got there first. ' + L.name + ', with ' + dates + ' dates in the bag.</p>' +
+    '<div class="tally tot"><span>Final score</span><b>' + (total + dates) + '</b></div>' +
+    '<button class="go" id="retry">Try ' + L.name + ' again</button>' +
+    '<button class="go ghost" id="post">Post the score to the chat</button>' +
+    '<div class="sent" id="sent"></div>');
+  document.getElementById('retry').onclick = advance;
+  wirePost(total + dates, 'got lost on ' + L.name);
+}
+
+function finalCard(){
+  showCard(
+    '<h1>Home</h1>' +
+    '<p class="lead">Three stretches of desert, and the fennec is in the den with the lot.</p>' +
+    '<div class="tally"><span>Dates on the last run</span><b>' + dates + '</b></div>' +
+    '<div class="tally tot"><span>Final score</span><b>' + total + '</b></div>' +
+    '<button class="go" id="post">Post the score to the chat</button>' +
+    '<button class="go ghost" id="retry">Run it again from the start</button>' +
+    '<div class="sent" id="sent"></div>');
+  document.getElementById('retry').onclick = () => { total = 0; lv = 0; advance(); };
+  wirePost(total, 'finished all three');
+}
+
+function wirePost(score, detail){
+  const b = document.getElementById('post'), s = document.getElementById('sent');
+  if (!b) return;
+  b.onclick = () => {
+    postScore(score, detail);
+    b.disabled = true; b.style.opacity = .5;
+    s.textContent = window.parent !== window
+      ? 'Sent to the chat.' : 'No chat to post to — this is running on its own.';
+  };
+}
+
+function advance(){
+  hideCard();
+  if (state === 'title'){ total = 0; loadLevel(0); }
+  else if (state === 'clear') loadLevel(lv + 1);
+  else if (state === 'dead'){ fox.hearts = 3; loadLevel(lv); }
+  else if (state === 'done'){ loadLevel(lv); }
+  fox.hearts = 3;
+  state = 'play';
+}
+
+/* ---------- the host says who is playing ---------- */
+addEventListener('message', e => {
+  const d = e.data;
+  if (d && d.type === 'host' && typeof d.name === 'string'){
+    hostName = d.name.slice(0, 24);
+    if (state === 'title') titleCard();
+  }
+});
+if (window.parent !== window) parent.postMessage({ type:'ready' }, '*');
+
+/* ---------- go ---------- */
+resize();
+loadLevel(0);
+titleCard();
+
+let last = performance.now(), frames = 0, lastDt = 0;
+(function loop(now){
+  // Schedule the next frame first. A game handed round a chat must not freeze
+  // permanently because one frame threw.
+  requestAnimationFrame(loop);
+  // The rAF timestamp can be earlier than the performance.now() taken when the
+  // frame was scheduled, so dt can arrive negative. Clamp it: a negative step
+  // runs the whole simulation backwards.
+  const dt = Math.max(0, Math.min((now - last) / 16.667, 2.6));
+  last = now; frames++; lastDt = dt;
+  step(dt); render(); hud();
+})(last);
+
+// exposed only so the test harness can drive a run; harmless in play
+window.__g = { fox: fox, get state(){ return state; }, get lv(){ return lv; },
+               get dates(){ return dates; }, get total(){ return total; },
+               scorps: () => scorps, pickups: () => pickups, levels: LEVELS,
+               advance: advance,
+               get t(){ return t; }, get frames(){ return frames; },
+               get view(){ return { VW:VW, VH:VH, yOff:yOff, scale:scale }; },
+               get lastDt(){ return lastDt; },
+               goto: n => { loadLevel(n); fox.hearts = 3; state = 'play'; hideCard(); } };
+</script>
