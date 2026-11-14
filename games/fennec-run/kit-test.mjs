@@ -188,6 +188,108 @@ check('muting suspends the audio', muted.st === 'suspended', muted.st);
 check('muting marks the page quiet', muted.quiet);
 check('unmuting restores it', muted.on === true);
 
+/* ---------------- the cat stays on the ground ---------------- */
+const cats = await p.evaluate(async () => {
+  const bad = [];
+  for (let i = 0; i < __g.levels.length; i++){
+    __g.goto(i);
+    __g.critters().filter(c => c.kind === 'caracal').forEach(c => {
+      if (c.y !== 300) bad.push('L' + (i+1) + ' caracal at y=' + c.y + ', not on the ground');
+    });
+  }
+  return bad;
+});
+check('every caracal spawns on the ground, never a ledge', cats.length === 0,
+      cats.join('; ') || 'all grounded');
+
+/* ---------------- the mouse: a heart, and a way out ---------------- */
+const mouseHeart = await p.evaluate(async () => {
+  let c = null;
+  for (let i = 0; i < __g.levels.length && !c; i++){
+    __g.goto(i); c = __g.critters().find(k => k.kind === 'jerboa') || null;
+  }
+  __g.fox.hearts = 1; __g.fox.inv = 999;
+  __g.fox.x = c.x; __g.fox.y = c.y;
+  for (let i = 0; i < 20; i++) await new Promise(r => requestAnimationFrame(r));
+  return { caught: !c.alive, hearts: __g.fox.hearts };
+});
+check('catching a jerboa gives a heart back', mouseHeart.caught && mouseHeart.hearts === 2,
+      'hearts ' + mouseHeart.hearts);
+
+const mouseEscape = await p.evaluate(async () => {
+  const frame = () => new Promise(r => requestAnimationFrame(r));
+  // find a jerboa that starts on a ledge, so there is an edge for it to use
+  let c = null, lv = 0;
+  for (let i = 0; i < __g.levels.length && !c; i++){
+    __g.goto(i); lv = i;
+    c = __g.critters().find(k => k.kind === 'jerboa' && k.y < 290) || null;
+  }
+  if (!c) return { noLedgeJerboa: true };
+  const startY = c.y, startX = c.x;
+  __g.fox.inv = 999; __g.fox.hearts = 3;
+  let leftLedge = false;
+  for (let f = 0; f < 240; f++){
+    // chase it from behind without ever touching it
+    __g.fox.x = c.x - 70; __g.fox.y = c.y; __g.fox.vy = 0; __g.fox.onGround = true;
+    await frame();
+    if (c.alive && c.y > startY + 12) leftLedge = true;
+    if (!c.alive) break;
+  }
+  return { leftLedge: leftLedge, escaped: !!c.escaped, alive: c.alive,
+           dropped: Math.round(c.y - startY), ran: Math.round(Math.abs(c.x - startX)) };
+});
+check('a hunted jerboa will go over the edge', mouseEscape.leftLedge ||
+      mouseEscape.escaped, mouseEscape.noLedgeJerboa ? 'no ledge jerboa found'
+        : 'dropped ' + mouseEscape.dropped + ', ran ' + mouseEscape.ran);
+
+const mouseGone = await p.evaluate(async () => {
+  let c = null;
+  for (let i = 0; i < __g.levels.length && !c; i++){
+    __g.goto(i); c = __g.critters().find(k => k.kind === 'jerboa') || null;
+  }
+  __g.fox.inv = 999;
+  __g.fox.x = c.x - 600; __g.fox.y = 300;          // it is already clear away
+  c.flee = 1; c.dir = 1;
+  for (let i = 0; i < 60; i++) await new Promise(r => requestAnimationFrame(r));
+  return { alive: c.alive, escaped: !!c.escaped };
+});
+check('a jerboa that gets clear is gone for good',
+      mouseGone.escaped && !mouseGone.alive, 'escaped=' + mouseGone.escaped);
+
+/* ---------------- the score has to actually build ---------------- */
+const build = await p.evaluate(async () => {
+  const out = [];
+  const ac = __g.snd.ctx() || (__g.snd.start(), __g.snd.ctx());
+  const an = ac.createAnalyser(); an.fftSize = 2048;
+  __g.snd.tap(an);
+  const buf = new Float32Array(an.fftSize);
+  for (let lv = 0; lv < 5; lv++){
+    __g.snd.setLevel(lv);
+    __g.snd.rewind();               // same bars for every stage, or it is noise
+    await new Promise(r => setTimeout(r, 400));
+    let peak = 0, sum = 0, n = 0;
+    for (let k = 0; k < 220; k++){
+      an.getFloatTimeDomainData(buf);
+      for (let i = 0; i < buf.length; i++){
+        const v = Math.abs(buf[i]); peak = Math.max(peak, v); sum += v * v; n++;
+      }
+      await new Promise(r => setTimeout(r, 25));
+    }
+    out.push({ lv: lv + 1, peak: +peak.toFixed(3), rms: +Math.sqrt(sum / n).toFixed(4) });
+  }
+  return out;
+});
+const rms = build.map(b => b.rms);
+check('the score is quietest on stage one', rms[0] === Math.min.apply(null, rms),
+      build.map(b => b.lv + ':' + b.rms).join('  '));
+check('it is loudest on stage five', rms[4] === Math.max.apply(null, rms),
+      'stage 5 rms ' + rms[4]);
+check('every stage is at least as full as the one before',
+      rms.every((v, i) => i === 0 || v >= rms[i - 1] - 0.002),
+      rms.join(' → '));
+check('stage five is clearly fuller than stage one', rms[4] > rms[0] * 1.6,
+      'x' + (rms[4] / rms[0]).toFixed(2));
+
 /* ---------------- the rule still holds with the new abilities ---------------- */
 const audits = await p.evaluate(() => __g.levels.map(L => __g.audit(L)));
 for (const a of audits)
@@ -360,20 +462,29 @@ const owlDamage = await p.evaluate(async () => {
     if (!L.plats.some(p => xx > p.x - 10 && xx < p.x + p.w + 10 && p.y < 282 && p.y > 130)){
       sx = xx; break;
     }
-  __g.fox.hearts = 3; __g.fox.inv = 0; c.cool = 0; c.state = 'patrol';
+  // Put the owl within its own fixing range to start with. Waiting for it to
+  // quarter back along a 1000-unit beat made this pass or fail on timing.
+  __g.fox.hearts = 3; __g.fox.inv = 0;
+  c.cool = 0; c.state = 'patrol'; c.x = sx + 70; c.y = c.baseY;
   let hitAt = null;
   for (let f = 0; f < 500; f++){
     __g.fox.x = sx; __g.fox.y = 300; __g.fox.vy = 0; __g.fox.onGround = true;
     await frame();
-    if (__g.fox.hearts < 3 && hitAt === null) hitAt = f;
+    if (__g.fox.hearts < 3 && hitAt === null){ hitAt = f; break; }
     if (__g.state !== 'play') break;
   }
-  return { hitAt: hitAt, hearts: __g.fox.hearts };
+  // Having taken one, the same dive must not take another.
+  const after = __g.fox.hearts;
+  for (let f = 0; f < 70; f++){
+    __g.fox.x = sx; __g.fox.y = 300; __g.fox.vy = 0; __g.fox.onGround = true;
+    await frame();
+  }
+  return { hitAt: hitAt, hearts: after, sameDive: after - __g.fox.hearts };
 });
 check('a stooping owl actually costs a heart', owlDamage.hitAt !== null,
       owlDamage.hitAt === null ? 'never connected' : 'hit on frame ' + owlDamage.hitAt);
-check('one dive costs one heart, not several', owlDamage.hearts >= 2,
-      'hearts ' + owlDamage.hearts);
+check('a single dive costs only one heart', owlDamage.sameDive === 0,
+      owlDamage.sameDive + ' further hits inside the invulnerability window');
 
 const owlCover = await p.evaluate(async () => {
   const frame = () => new Promise(r => requestAnimationFrame(r));
@@ -415,12 +526,13 @@ const jerboaWorth = await p.evaluate(async () => {
   for (let i = 0; i < __g.levels.length && !c; i++){
     __g.goto(i); c = __g.critters().find(k => k.kind === 'jerboa') || null;
   }
-  __g.fox.bounds = 0; __g.fox.charge = 0; __g.fox.inv = 999; __g.fox.hearts = 3;
+  __g.fox.bounds = 0; __g.fox.charge = 0; __g.fox.inv = 999;
+  __g.fox.hearts = 3;                      // nothing to heal, so it must pay out
   __g.fox.x = c.x; __g.fox.y = c.y;
   for (let i = 0; i < 20; i++) await new Promise(r => requestAnimationFrame(r));
-  return { caught: !c.alive, bounds: __g.fox.bounds };
+  return { caught: !c.alive, bounds: __g.fox.bounds, hearts: __g.fox.hearts };
 });
-check('one jerboa is worth a whole Bound',
+check('at full hearts a jerboa is worth a Bound instead, never nothing',
       jerboaWorth.caught && jerboaWorth.bounds === 1,
       'caught=' + jerboaWorth.caught + ' bounds=' + jerboaWorth.bounds);
 
