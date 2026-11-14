@@ -344,6 +344,37 @@ check('a stoop is aimed once, not re-aimed every frame',
 check('a stoop reaches the fox', owlHunt && owlHunt.gotLow !== null &&
       owlHunt.gotLow > 200, 'dived to y=' + (owlHunt && owlHunt.gotLow));
 
+// Every other owl check above runs with inv = 999, which proves it dives but
+// never proves it connects. A predator that cannot actually hurt you is the
+// same "no point" fault in a different costume, so it gets its own check.
+const owlDamage = await p.evaluate(async () => {
+  const frame = () => new Promise(r => requestAnimationFrame(r));
+  let c = null, lv = 0;
+  for (let i = 0; i < __g.levels.length && !c; i++){
+    __g.goto(i); lv = i; c = __g.critters().find(k => k.kind === 'owl') || null;
+  }
+  const L = __g.levels[lv];
+  const open = L.ground.find(g => g[1] - g[0] > 200 && c.a < g[1] && c.b > g[0]) || L.ground[0];
+  let sx = null;
+  for (let xx = Math.max(open[0] + 30, c.a); xx < Math.min(open[1] - 30, c.b); xx += 10)
+    if (!L.plats.some(p => xx > p.x - 10 && xx < p.x + p.w + 10 && p.y < 282 && p.y > 130)){
+      sx = xx; break;
+    }
+  __g.fox.hearts = 3; __g.fox.inv = 0; c.cool = 0; c.state = 'patrol';
+  let hitAt = null;
+  for (let f = 0; f < 500; f++){
+    __g.fox.x = sx; __g.fox.y = 300; __g.fox.vy = 0; __g.fox.onGround = true;
+    await frame();
+    if (__g.fox.hearts < 3 && hitAt === null) hitAt = f;
+    if (__g.state !== 'play') break;
+  }
+  return { hitAt: hitAt, hearts: __g.fox.hearts };
+});
+check('a stooping owl actually costs a heart', owlDamage.hitAt !== null,
+      owlDamage.hitAt === null ? 'never connected' : 'hit on frame ' + owlDamage.hitAt);
+check('one dive costs one heart, not several', owlDamage.hearts >= 2,
+      'hearts ' + owlDamage.hearts);
+
 const owlCover = await p.evaluate(async () => {
   const frame = () => new Promise(r => requestAnimationFrame(r));
   let c = null, lv = 0;
