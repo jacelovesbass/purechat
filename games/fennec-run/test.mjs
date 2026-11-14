@@ -191,6 +191,42 @@ const reach = await p.evaluate(() => {
 });
 check('no enemy or spike floats over a pit', reach.length === 0, reach.join('; ') || 'clean');
 
+// --- the reachability rule. Every surface must be gettable by plain jumping,
+//     every date collectable, every pit crossable, with slack. Measured from
+//     the physics constants, so it re-derives itself if any of them move.
+const audits = await p.evaluate(() => __g.levels.map(L => __g.audit(L)));
+for (const a of audits)
+  check('level "' + a.level + '" satisfies the reachability rule',
+        a.problems.length === 0,
+        a.problems.length ? a.problems.join(' | ')
+                          : a.plainReached + '/' + a.surfaces + ' surfaces by plain jump');
+
+// a scorpion must stay on the surface it spawned on
+const floaters = await p.evaluate(() => {
+  const out = [];
+  __g.levels.forEach((L, i) => {
+    __g.goto(i);
+    __g.scorps().forEach((s, j) => {
+      const onPlat = L.plats.some(p => s.a >= p.x && s.b <= p.x + p.w && Math.abs(s.y - p.y) < 1);
+      const onGnd  = L.ground.some(g => s.a >= g[0] && s.b <= g[1]) && s.y === 300;
+      if (!onPlat && !onGnd) out.push('L' + (i+1) + ' scorpion ' + j +
+        ' patrols ' + Math.round(s.a) + '..' + Math.round(s.b) + ' at y=' + s.y);
+    });
+  });
+  __g.goto(0);
+  return out;
+});
+check('no scorpion patrols off its surface', floaters.length === 0,
+      floaters.join('; ') || 'all clamped');
+
+// the rule must actually bite: a deliberately unreachable platform is caught
+const bites = await p.evaluate(() => {
+  const L = JSON.parse(JSON.stringify(__g.levels[0]));
+  L.plats.push({ x: 700, y: 40, w: 60 });        // far above any possible jump
+  return __g.audit(L).problems.filter(s => s.indexOf('y=40') >= 0).length;
+});
+check('the rule catches a platform placed out of reach', bites > 0, bites + ' reported');
+
 // --- screenshots of each level for the eye
 for (const i of [0, 1, 2]){
   await p.evaluate(n => {

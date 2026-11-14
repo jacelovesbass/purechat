@@ -284,6 +284,34 @@ const IDLE_CYCLE = [pose({}), pose({bodyY:1, squash:.975, earL:2, earR:3, headY:
 
 /* ============================================================
    Levels
+
+   THE REACHABILITY RULE. A stage is only valid if audit() returns no
+   problems. Build one, audit it, throw it away if it complains. That applies
+   to these three exactly as it would to a generated one.
+
+   The four numbers below are MEASURED from GRAV, RUNV, JUMPV and GLIDE_VY by
+   envelope(), not written down here, because they change the moment any of
+   those constants is touched. At the time of writing they come out as:
+
+     maxRise        91   highest a jump reaches
+     usableRise     91   highest you can still land on, falling
+     maxGap        120   furthest a full-speed jump carries, flat
+     maxGapGliding 240   the same holding jump on the way down
+
+   The rule, in four parts:
+
+   1. Every surface must be reachable from the spawn by PLAIN JUMPS. The glide
+      is a skill move, not a toll. A player who has not found it must still be
+      able to finish.
+   2. No route may need more than 80% of a maximum jump (TIGHT). A platform at
+      95% is reachable by a solver and reads as unreachable to a person.
+   3. Every date must be collectable, and the den must sit on solid ground.
+      A date may ask for a glide; traversal may not.
+   4. Run-up counts. You do not launch at full speed from a standing start, so
+      a short platform throws a shorter jump. audit() models this.
+
+   Practical limits that fall out of it: keep a climb under 72 and a pit under
+   96, and the rest looks after itself.
    ============================================================ */
 const GY = 300;                        // ground top, world units
 const row = (x, y, n, gap) => { const a = []; for (let i = 0; i < n; i++) a.push({x:x+i*(gap||26), y:y}); return a; };
@@ -308,42 +336,42 @@ const LEVELS = [
     name: 'The Wadi', w: 3100, den: 2970,
     sky: ['#79C6E6', '#F3DDBE'], hillA: '#DDC79C', hillB: '#C9A974',
     dirt: '#BE7C45', crust: '#D89A5C',
-    ground: [[0, 520], [610, 1080], [1180, 1560], [1680, 2240], [2345, 3100]],
-    plats: [ {x:300,y:228,w:100}, {x:640,y:200,w:90}, {x:820,y:155,w:90},
-             {x:1000,y:210,w:110}, {x:1215,y:168,w:100}, {x:1400,y:222,w:120},
-             {x:1700,y:190,w:100}, {x:1880,y:145,w:110}, {x:2060,y:205,w:120},
+    ground: [[0, 520], [600, 1090], [1170, 1580], [1660, 2240], [2330, 3100]],
+    plats: [ {x:300,y:228,w:100}, {x:640,y:238,w:90}, {x:800,y:180,w:90},
+             {x:1000,y:210,w:110}, {x:1190,y:175,w:100}, {x:1400,y:238,w:120},
+             {x:1700,y:240,w:100}, {x:1870,y:185,w:100}, {x:2040,y:235,w:110},
              {x:2380,y:230,w:110}, {x:2560,y:180,w:120}, {x:2760,y:232,w:120} ],
     spikes: [ {x:430, w:60}, {x:1460, w:54}, {x:2160, w:60} ],
-    scorps: [ {x:340, a:290, b:420}, {x:1030, a:985, b:1120},
-              {x:1930, a:1870, b:2000}, {x:2600, a:2545, b:2690} ],
+    scorps: [ {x:340, a:300, b:400}, {x:1030, a:1000, b:1110},
+              {x:1920, a:1870, b:1970}, {x:2600, a:2560, b:2680} ],
     dates: [].concat(
-      row(315, 196, 3), row(655, 168, 3), row(838, 123, 3),
-      row(1018, 178, 4), row(1232, 136, 3), row(1418, 190, 4),
-      row(1600, 250, 3, 24), row(1715, 158, 3), row(1898, 113, 4),
-      row(2078, 173, 4), row(2270, 248, 3, 24), row(2398, 198, 3),
+      row(315, 196, 3), row(655, 206, 3), row(818, 148, 3),
+      row(1018, 178, 4), row(1207, 143, 3), row(1418, 206, 4),
+      row(1600, 250, 3, 24), row(1715, 208, 3), row(1888, 153, 4),
+      row(2058, 203, 4), row(2255, 248, 3, 24), row(2398, 198, 3),
       row(2578, 148, 4), row(2778, 200, 3))
   },
   {
     name: 'Night Run', w: 3500, den: 3380,
     sky: ['#2E3F66', '#6E5B86'], hillA: '#4A4166', hillB: '#372F4F',
     dirt: '#4A3A52', crust: '#6B5570', night: true,
-    ground: [[0, 480], [580, 980], [1090, 1420], [1540, 1900], [2010, 2520], [2640, 3500]],
-    plats: [ {x:250,y:222,w:90}, {x:600,y:190,w:80}, {x:770,y:140,w:80},
-             {x:940,y:196,w:90}, {x:1120,y:232,w:90}, {x:1290,y:175,w:90},
-             {x:1460,y:130,w:85}, {x:1620,y:195,w:90}, {x:1800,y:240,w:90},
-             {x:1960,y:180,w:95}, {x:2140,y:132,w:95}, {x:2330,y:198,w:100},
-             {x:2560,y:235,w:100}, {x:2740,y:180,w:100}, {x:2930,y:135,w:100},
-             {x:3140,y:205,w:110} ],
+    ground: [[0, 480], [570, 980], [1070, 1420], [1510, 1900], [1990, 2520], [2610, 3500]],
+    plats: [ {x:250,y:238,w:90}, {x:600,y:232,w:80}, {x:750,y:178,w:80},
+             {x:940,y:232,w:90}, {x:1100,y:186,w:90}, {x:1290,y:238,w:90},
+             {x:1460,y:184,w:85}, {x:1620,y:236,w:90}, {x:1800,y:186,w:90},
+             {x:1960,y:236,w:95}, {x:2120,y:182,w:95}, {x:2330,y:234,w:100},
+             {x:2560,y:186,w:100}, {x:2740,y:236,w:100}, {x:2910,y:182,w:100},
+             {x:3140,y:238,w:110} ],
     spikes: [ {x:360, w:54}, {x:1180, w:54}, {x:1700, w:60}, {x:2220, w:60}, {x:3020, w:54} ],
-    scorps: [ {x:290, a:255, b:330}, {x:965, a:940, b:1020},
-              {x:1655, a:1625, b:1700}, {x:2180, a:2140, b:2260},
-              {x:2790, a:2750, b:2830}, {x:3180, a:3145, b:3240} ],
+    scorps: [ {x:290, a:250, b:340}, {x:980, a:940, b:1030},
+              {x:1660, a:1620, b:1710}, {x:2160, a:2120, b:2215},
+              {x:2790, a:2740, b:2840}, {x:3180, a:3140, b:3250} ],
     dates: [].concat(
-      row(262, 190, 3), row(615, 158, 3), row(785, 108, 3), row(955, 164, 3),
-      row(1135, 200, 3), row(1305, 143, 3), row(1472, 98, 3), row(1635, 163, 3),
-      row(1815, 208, 3), row(1975, 148, 3), row(2155, 100, 3), row(2345, 166, 3),
-      row(2450, 250, 4, 24), row(2575, 203, 3), row(2755, 148, 3),
-      row(2945, 103, 3), row(3155, 173, 4))
+      row(262, 206, 3), row(615, 200, 3), row(765, 146, 3), row(955, 200, 3),
+      row(1115, 154, 3), row(1305, 206, 3), row(1472, 152, 3), row(1635, 204, 3),
+      row(1815, 154, 3), row(1975, 204, 3), row(2135, 150, 3), row(2345, 202, 3),
+      row(2450, 250, 4, 24), row(2575, 154, 3), row(2755, 204, 3),
+      row(2925, 150, 3), row(3155, 206, 4))
   }
 ];
 
@@ -389,8 +417,19 @@ function loadLevel(i){
   scorps  = L.scorps.map(s => ({ x:s.x, a:s.a, b:s.b, dir:1, y:GY, alive:true, w:11 }));
   pickups = L.dates.map(d => ({ x:d.x, y:d.y, got:false }));
   parts = [];
-  // a scorpion stands on whatever is under it at spawn
-  scorps.forEach(s => { s.y = surfaceAt(s.x); });
+  // A scorpion stands on whatever is under it at spawn, and its height never
+  // changes afterwards, so its patrol has to be clamped to that same surface
+  // or it walks off the end and hangs in the air.
+  scorps.forEach(s => {
+    const p = L.plats.find(p => s.x >= p.x && s.x <= p.x + p.w);
+    s.y = p ? p.y : GY;
+    if (p){ s.a = Math.max(s.a, p.x); s.b = Math.min(s.b, p.x + p.w); }
+    else {
+      const g = L.ground.find(g => s.x >= g[0] && s.x <= g[1]);
+      if (g){ s.a = Math.max(s.a, g[0]); s.b = Math.min(s.b, g[1]); }
+    }
+    if (s.b < s.a) s.b = s.a;
+  });
 }
 
 function groundAt(px){
@@ -927,6 +966,241 @@ function advance(){
   state = 'play';
 }
 
+/* ============================================================
+   Reachability: the rule, and the code that enforces it.
+
+   A level is only honest if everything in it can actually be got to. That is
+   not a judgement to make by eye, and it is not a constant to write down by
+   hand either, because it falls out of GRAV, RUNV, JUMPV and GLIDE_VY and
+   changes the moment any of those is touched.
+
+   So it is measured, by flying the same arithmetic step() flies. Everything
+   below is derived; nothing is a magic number.
+
+   audit(L) returns the envelope and a list of problems. A stage generator
+   should build, call audit, and throw the stage away if problems is not empty.
+   ============================================================ */
+
+// A route may use at most this fraction of a maximum jump. The slack is the
+// difference between a level that can be completed and one that is pleasant.
+const TIGHT = 0.8;
+
+function surfacesOf(L){
+  const S = L.ground.map(g => ({ x0:g[0], x1:g[1], y:GY, ground:true }));
+  for (const p of L.plats) S.push({ x0:p.x, x1:p.x + p.w, y:p.y, ground:false });
+  return S;
+}
+
+// How fast you can actually be going at the launch point. You do not get RUNV
+// for free: you get what the run-up room allows, accelerating the way step()
+// accelerates. Short platforms therefore throw shorter jumps, which is the
+// whole reason a level can look fine on paper and not play.
+function speedAfter(runway){
+  let v = 0, d = 0;
+  for (let f = 0; f < 200 && d < runway; f++){ v += (RUNV - v) * 0.24; d += v; }
+  return Math.min(v, RUNV);
+}
+
+// One flight, integrated exactly as step() does: vy first, then position.
+function flight(L, S, from, x0, dir, vy0, glide, speed){
+  const path = [];
+  let x = x0, y = from.y, vy = vy0;
+  const vx = (speed === undefined ? RUNV : speed) * dir;
+  for (let f = 0; f < 220; f++){
+    const prevY = y;
+    vy = (glide && vy > 0.6) ? Math.min(vy + GRAV, GLIDE_VY) : Math.min(vy + GRAV, TERM);
+    y += vy; x += vx;
+    path.push({ x:x, y:y });
+    if (vy >= 0){
+      for (const s of S){
+        // step() forgives 12 units of overhang. The audit forgives 4: landing
+        // on the very lip is not something to design a route around, and a
+        // level that only works that way plays as if the platform is missing.
+        const pad = s.ground ? 0 : 4;
+        const lip = s.ground ? 14 : 1;
+        if (prevY <= s.y + lip && y >= s.y && x >= s.x0 - pad && x <= s.x1 + pad)
+          return { to:s, path:path, land:x };
+      }
+    }
+    if (y > WH + 90) return { to:null, path:path };     // down a pit
+    if (x < 8 || x > L.w - 8) return { to:null, path:path };
+  }
+  return { to:null, path:path };
+}
+
+// Every way off a surface: jump from anywhere along it, or walk off either end,
+// each with and without the glide, in both directions.
+function flightsFrom(L, S, s){
+  const out = [];
+  for (let x = s.x0; x <= s.x1 + 0.01; x = Math.min(x + 20, s.x1 + 0.001)){
+    for (const dir of [-1, 1]){
+      // run-up is whatever lies behind you on this surface
+      const speed = speedAfter(dir > 0 ? x - s.x0 : s.x1 - x);
+      for (const glide of [false, true])
+        out.push(Object.assign(flight(L, S, s, x, dir, JUMPV, glide, speed),
+                               { from:s, glide:glide, launch:x }));
+    }
+    if (x >= s.x1) break;
+  }
+  for (const [edge, dir] of [[s.x0 - 1, -1], [s.x1 + 1, 1]]){
+    const speed = speedAfter(s.x1 - s.x0);
+    for (const glide of [false, true])
+      out.push(Object.assign(flight(L, S, s, edge, dir, 0, glide, speed),
+                             { from:s, glide:glide, launch:edge }));
+  }
+  return out;
+}
+
+// How far a full-speed jump carries horizontally by the time it comes back down
+// through a given height. rise > 0 means the target sits above the launch.
+function reachAt(rise){
+  let vy = JUMPV, y = 0, dx = 0;
+  for (let f = 0; f < 600; f++){
+    vy = Math.min(vy + GRAV, TERM);
+    y += vy; dx += RUNV;
+    if (vy > 0 && y >= -rise) return dx;     // descending through the target
+    if (y > 600) break;
+  }
+  return dx;
+}
+
+function envelope(){
+  // Highest point of a jump, and how far it carries at full speed, measured by
+  // flying it rather than by solving v^2/2g, because the step is discrete.
+  const run = glide => {
+    let vy = JUMPV, y = 0, dx = 0, rise = 0;
+    for (let f = 0; f < 400; f++){
+      vy = (glide && vy > 0.6) ? Math.min(vy + GRAV, GLIDE_VY) : Math.min(vy + GRAV, TERM);
+      y += vy; dx += RUNV;
+      rise = Math.min(rise, y);
+      if (y >= 0 && vy > 0) return { rise:-rise, gap:dx };
+    }
+    return { rise:-rise, gap:dx };
+  };
+  const plain = run(false), glided = run(true);
+  // How high can a platform be and still be landed on, allowing for the fact
+  // that you must be falling (vy >= 0) by the time you arrive.
+  let vy = JUMPV, y = 0, topAt = 0, dxAtTop = 0;
+  for (let f = 0; f < 400; f++){
+    vy = Math.min(vy + GRAV, TERM); y += vy; dxAtTop += RUNV;
+    if (vy >= 0){ topAt = -y; break; }
+  }
+  return {
+    maxRise: +plain.rise.toFixed(1),
+    usableRise: +topAt.toFixed(1),
+    maxGap: +plain.gap.toFixed(1),
+    maxGapGliding: +glided.gap.toFixed(1),
+    // what a level designer, or a generator, should actually stay inside
+    safeRise: Math.floor(topAt * 0.8),
+    safeGap: Math.floor(plain.gap * 0.8)
+  };
+}
+
+function audit(L){
+  const S = surfacesOf(L);
+  const spawn = S.find(s => s.ground && 60 >= s.x0 && 60 <= s.x1) || S[0];
+  const all = new Map();
+  for (const s of S) all.set(s, flightsFrom(L, S, s));
+
+  // Two reachability sets, and the difference between them is the point.
+  // The glide is a skill move, not a toll: traversal must work without it, or
+  // a player who has not discovered it is simply stuck.
+  const spread = useGlide => {
+    const seen = new Set([spawn]), q = [spawn];
+    while (q.length){
+      const s = q.shift();
+      for (const f of all.get(s)){
+        if (!f.to || (f.glide && !useGlide) || seen.has(f.to)) continue;
+        seen.add(f.to); q.push(f.to);
+      }
+    }
+    return seen;
+  };
+  const plainReach = spread(false);
+  const reach = spread(true);
+
+  // How hard is the easiest plain jump onto each surface? A platform that can
+  // only be had with a near-maximum jump reads to a player as unreachable even
+  // though a solver calls it fine, so it is a defect, not a flourish.
+  //
+  // The measure is the gap you must clear against how far the jump actually
+  // carries *at that height*, which is the real constraint. Distance alone is
+  // not: a jump down off a ledge travels much further than one onto a shelf,
+  // and is easier, not harder.
+  const env0 = envelope();
+  const effort = new Map();
+  for (const s of S){
+    if (!plainReach.has(s)) continue;
+    let best = Infinity;
+    for (const from of S){
+      if (!plainReach.has(from) || from === s) continue;
+      if (!all.get(from).some(f => f.to === s && !f.glide)) continue;
+      const rise = from.y - s.y;                       // positive: climbing
+      if (rise > env0.usableRise) continue;
+      const gap = s.x0 > from.x1 ? s.x0 - from.x1
+                : from.x0 > s.x1 ? from.x0 - s.x1 : 0; // overlapping: no gap
+      const carry = reachAt(rise);
+      best = Math.min(best, Math.max(Math.max(0, rise) / env0.usableRise,
+                                     carry > 0 ? gap / carry : Infinity));
+    }
+    if (best < Infinity) effort.set(s, best);
+  }
+
+  const problems = [];
+  for (const s of S){
+    const what = (s.ground ? 'ground' : 'platform') + ' at x=' + Math.round(s.x0) +
+                 '..' + Math.round(s.x1) + ' y=' + s.y;
+    if (!reach.has(s)) problems.push(what + ' cannot be reached at all');
+    else if (!plainReach.has(s)) problems.push(what + ' needs a glide to reach');
+    else if (effort.get(s) > TIGHT)
+      problems.push(what + ' needs ' + Math.round(effort.get(s) * 100) +
+                    '% of a maximum jump, over the ' + Math.round(TIGHT * 100) + '% limit');
+  }
+
+  // A date counts as reachable if standing anywhere reachable picks it up, or
+  // any flight from anywhere reachable passes through it. Same test step() uses.
+  const near = (d, x, y) => Math.abs(d.x - x) < 19 && Math.abs(d.y - (y - 26)) < 26;
+  for (const d of L.dates){
+    let got = false;
+    for (const s of S){
+      if (!reach.has(s)) continue;
+      for (let x = s.x0 - 12; x <= s.x1 + 12 && !got; x += 4) if (near(d, x, s.y)) got = true;
+      if (got) break;
+      for (const f of all.get(s)){
+        for (const pt of f.path) if (near(d, pt.x, pt.y)){ got = true; break; }
+        if (got) break;
+      }
+      if (got) break;
+    }
+    if (!got) problems.push('date at x=' + d.x + ' y=' + d.y + ' cannot be collected');
+  }
+
+  // The den has to be stood on, and every pit has to be crossable.
+  if (!L.ground.some(g => L.den >= g[0] && L.den <= g[1]))
+    problems.push('the den at x=' + L.den + ' is not on solid ground');
+  const env = envelope();
+  for (let i = 0; i < L.ground.length - 1; i++){
+    const gap = L.ground[i + 1][0] - L.ground[i][1];
+    if (gap > env.maxGap)
+      problems.push('pit at x=' + L.ground[i][1] + ' is ' + Math.round(gap) +
+                    ' wide, past the ' + Math.round(env.maxGap) + ' a jump carries');
+  }
+  // Per surface detail, so a bad level says what is wrong with it rather than
+  // just that something is.
+  const detail = S.map(s => {
+    let how = 'unreachable';
+    if (plainReach.has(s)) how = effort.get(s) > TIGHT ? 'tight' : 'jump';
+    else if (reach.has(s)) how = 'glide only';
+    if (s === spawn) how = 'spawn';
+    return { what: s.ground ? 'ground' : 'platform',
+             x0: Math.round(s.x0), x1: Math.round(s.x1), y: s.y, how: how,
+             effort: effort.has(s) ? +(effort.get(s) * 100).toFixed(0) : null };
+  });
+
+  return { level: L.name, envelope: env, problems: problems, detail: detail,
+           surfaces: S.length, plainReached: plainReach.size, reached: reach.size };
+}
+
 /* ---------- the host says who is playing ---------- */
 addEventListener('message', e => {
   const d = e.data;
@@ -962,6 +1236,7 @@ window.__g = { fox: fox, get state(){ return state; }, get lv(){ return lv; },
                advance: advance,
                get t(){ return t; }, get frames(){ return frames; },
                get view(){ return { VW:VW, VH:VH, yOff:yOff, scale:scale }; },
+               audit: audit, envelope: envelope,
                get lastDt(){ return lastDt; },
                goto: n => { loadLevel(n); fox.hearts = 3; state = 'play'; hideCard(); } };
 </script>
