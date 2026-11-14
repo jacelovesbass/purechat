@@ -341,11 +341,11 @@ const GUIDE = {
   scorpion: ['Scorpion',
              'Prey, not predator. Fennecs hunt and eat scorpions, and take the sting as part of the deal.'],
   jerboa:   ['Jerboa',
-             'A long-legged desert rodent that hops rather than runs. One of the fennec’s main catches.'],
+             'A long-legged desert rodent that hops rather than runs. The best meal out here: run one down and it is worth a Bound on its own.'],
   caracal:  ['Caracal',
              'A desert cat that hunts fennecs. Several times your size, so there is no pouncing on it.'],
   owl:      ['Pharaoh eagle-owl',
-             'Takes fennec pups out of open ground. The reason a small fox keeps to cover.']
+             'Takes fennec pups out of open ground. It rises before it stoops. Get under a ledge and it breaks off, which is why a small fox keeps to cover.']
 };
 const seen = {};
 let noteUntil = 0;
@@ -845,7 +845,8 @@ function loadLevel(i){
     .concat(walker('caracal', L.caracals))
     // Owls fly, so they are the one thing not pinned to a surface.
     .concat((L.owls || []).map(o =>
-      ({ kind:'owl', x:o.x, a:o.a, b:o.b, y:o.y, baseY:o.y, dir:1, alive:true, swoop:0 })));
+      ({ kind:'owl', x:o.x, a:o.a, b:o.b, y:o.y, baseY:o.y, dir:1, alive:true,
+         swoop:0, state:'patrol', timer:0, cool:60, tx:0, ty:0 })));
   pickups = L.dates.map(d => ({ x:d.x, y:d.y, got:false }));
   parts = [];
   // A ground critter stands on whatever is under it at spawn and its height
@@ -871,6 +872,14 @@ function loadLevel(i){
                    return g ? { a:g[0], b:g[1] } : { a:c.a, b:c.b };
                  })();
   });
+}
+
+// A ledge overhead. This is the whole reason the owl exists: the field note
+// says a small fox keeps to cover, so cover has to actually do something.
+function underCover(px, py){
+  for (const p of L.plats)
+    if (px > p.x - 10 && px < p.x + p.w + 10 && p.y < py - 18 && p.y > py - 170) return true;
+  return false;
 }
 
 function groundAt(px){
@@ -1103,15 +1112,46 @@ function step(dt){
       if (c.x > hi){ c.x = hi; c.dir = -1; }
 
     } else if (c.kind === 'owl'){
-      // quarters its stretch, then stoops. Owls take pups out of the open.
-      c.x += c.dir * 1.15 * dt;
-      if (c.x < c.a){ c.x = c.a; c.dir = 1; }
-      if (c.x > c.b){ c.x = c.b; c.dir = -1; }
-      const over = Math.abs(c.x - fox.x) < 150;
-      c.swoop += dt * (over ? 0.05 : -0.04);
-      c.swoop = Math.max(0, Math.min(1, c.swoop));
-      c.y = c.baseY + c.swoop * (fox.y - 34 - c.baseY) + Math.sin(t / 22) * 4;
-      if (over && c.swoop > 0.1) c.dir = fox.x > c.x ? 1 : -1;
+      // Quarter, fix, stoop, climb. The first version re-aimed at the fox every
+      // frame, so it never committed to anything and read as drunk rather than
+      // as hunting. A real stoop is decided once and then flown.
+      const covered = underCover(fox.x, fox.y);
+      if (c.cool > 0) c.cool -= dt;
+
+      if (c.state === 'stoop' || c.state === 'climb'){
+        const tx = c.state === 'stoop' ? c.tx : c.x;
+        const ty = c.state === 'stoop' ? c.ty : c.baseY;
+        const sp = c.state === 'stoop' ? 4.7 : 2.3;
+        const ax = tx - c.x, ay = ty - c.y;
+        const d = Math.sqrt(ax * ax + ay * ay) || 1;
+        c.x += (ax / d) * sp * dt;
+        c.y += (ay / d) * sp * dt;
+        if (Math.abs(ax) > 2) c.dir = ax > 0 ? 1 : -1;
+        if (d < 12){
+          if (c.state === 'stoop') c.state = 'climb';
+          else { c.state = 'patrol'; c.cool = 120; }
+        }
+
+      } else if (c.state === 'fix'){
+        // rises and hangs: the tell, so a stoop is never a surprise
+        c.timer -= dt;
+        c.y = c.baseY - 12 + Math.sin(t / 5) * 2.2;
+        if (covered){ c.state = 'patrol'; c.cool = 70; }
+        else if (c.timer <= 0){
+          c.state = 'stoop'; c.tx = fox.x; c.ty = fox.y - 24;
+        }
+
+      } else {
+        c.x += c.dir * 1.1 * dt;
+        if (c.x < c.a){ c.x = c.a; c.dir = 1; }
+        if (c.x > c.b){ c.x = c.b; c.dir = -1; }
+        c.y = c.baseY + Math.sin(t / 26 + c.a * 0.01) * 5;
+        if (!covered && c.cool <= 0 && Math.abs(c.x - fox.x) < 175 &&
+            fox.y > c.baseY + 60){
+          c.state = 'fix'; c.timer = 32; c.dir = fox.x > c.x ? 1 : -1;
+        }
+      }
+      c.swoop = c.state === 'stoop' ? 1 : 0;
     }
 
     const dx = Math.abs(c.x - fox.x), dy = fox.y - c.y;
@@ -1124,11 +1164,19 @@ function step(dt){
         c.alive = false;
         if (c.kind === 'scorpion'){ fox.vy = -7.6; fox.buffer = 0; }
         burst(c.x, c.y - 8, c.kind === 'scorpion' ? '#8C4A3A' : '#D9B88A', 12);
-        runDates += c.kind === 'scorpion' ? 2 : 3;
-        fox.charge += c.kind === 'scorpion' ? 2 : 3;
-        while (fox.charge >= DATES_PER_BOUND){
-          fox.charge -= DATES_PER_BOUND;
-          if (fox.bounds < MAX_BOUNDS) fox.bounds++;
+        // A jerboa is the best meal out here, so it is worth a whole Bound on
+        // its own. That is the point of chasing something that runs away.
+        if (c.kind === 'jerboa'){
+          runDates += 4;
+          if (fox.bounds < MAX_BOUNDS){ fox.bounds++; burst(c.x, c.y - 26, '#F6CFC6', 14); }
+          else runDates += 4;
+        } else {
+          runDates += 2;
+          fox.charge += 2;
+          while (fox.charge >= DATES_PER_BOUND){
+            fox.charge -= DATES_PER_BOUND;
+            if (fox.bounds < MAX_BOUNDS) fox.bounds++;
+          }
         }
         SND.stomp(); met(c.kind);
       } else {
@@ -1354,8 +1402,21 @@ function drawCaracal(c){
 }
 
 function drawOwl(c){
-  const flap = Math.sin(t / 6) * (c.swoop > 0.15 ? 0.25 : 0.6);
+  // While it is fixed on you there is a mark on the ground beneath it. A stoop
+  // that arrives with no warning is not difficulty, it is just unfair.
+  if (c.state === 'fix'){
+    const g = groundAt(c.x);
+    const my = g === null ? GY : g;
+    x.save();
+    x.globalAlpha = 0.25 + Math.sin(t / 4) * 0.12;
+    x.fillStyle = '#2E2622';
+    x.beginPath(); x.ellipse(c.x - cam, my - 3, 15, 4.5, 0, 0, 7); x.fill();
+    x.globalAlpha = 1;
+    x.restore();
+  }
+  const flap = Math.sin(t / 6) * (c.swoop > 0.15 ? 0.22 : 0.6);
   x.save(); x.translate(c.x - cam, c.y); x.scale(c.dir, 1);
+  if (c.state === 'stoop') x.rotate(0.3);      // tipped into the dive
   x.lineJoin = 'round';
   const F = '#A98B63', E = '#4A3827';
   x.strokeStyle = E; x.lineWidth = 2;
@@ -1641,6 +1702,7 @@ function titleCard(){
       '<div><b>Melon</b><span>Water, and a heart back. Never anywhere safe</span></div>' +
       '<div><b>Hunting</b><span>Scorpions and jerboas are food. Pounce on them</span></div>' +
       '<div><b>Hunted</b><span>Caracals and eagle-owls eat fennecs. Too big to pounce on</span></div>' +
+      '<div><b>Cover</b><span>An owl rises before it stoops. Get under a ledge and it breaks off</span></div>' +
       '<div><b>Hearts</b><span>Three, and a pit takes the lot</span></div>' +
       '<div><b>Sound</b><span>M, or the note in the corner</span></div>' +
     '</div>' +
@@ -1956,6 +2018,15 @@ function audit(L){
   // The den has to be stood on, and every pit has to be crossable.
   if (!L.ground.some(g => L.den >= g[0] && L.den <= g[1]))
     problems.push('the den at x=' + L.den + ' is not on solid ground');
+  // An owl breaks off when the fox is under a ledge, so a beat with no ledge in
+  // it is a stretch with no answer to the owl. That is a level fault.
+  for (const o of (L.owls || [])){
+    const cover = L.plats.some(p => p.x + p.w > o.a && p.x < o.b && p.y < GY - 40);
+    if (!cover)
+      problems.push('owl beat x=' + o.a + '..' + o.b +
+                    ' has no platform anywhere along it to shelter under');
+  }
+
   const env = envelope();
   for (let i = 0; i < L.ground.length - 1; i++){
     const gap = L.ground[i + 1][0] - L.ground[i][1];

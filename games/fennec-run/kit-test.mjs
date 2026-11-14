@@ -294,6 +294,105 @@ const ledge = await p.evaluate(async () => {
 check('a charging caracal stays on its ledge', ledge.length === 0,
       ledge.join('; ') || 'all held');
 
+/* ---------------- the owl has to hunt, and cover has to answer it ---------------- */
+const owlHunt = await p.evaluate(async () => {
+  const frame = () => new Promise(r => requestAnimationFrame(r));
+  let c = null, lv = 0;
+  for (let i = 0; i < __g.levels.length && !c; i++){
+    __g.goto(i); lv = i;
+    c = __g.critters().find(k => k.kind === 'owl') || null;
+  }
+  if (!c) return null;
+  const L = __g.levels[lv];
+  // park the fox in the open, well below the owl, on solid ground
+  const open = L.ground.find(g => g[1] - g[0] > 200 && c.a < g[1] && c.b > g[0]) || L.ground[0];
+  let standX = null;
+  for (let xx = Math.max(open[0] + 30, c.a); xx < Math.min(open[1] - 30, c.b); xx += 10){
+    const covered = L.plats.some(p => xx > p.x - 10 && xx < p.x + p.w + 10 &&
+                                      p.y < 300 - 18 && p.y > 300 - 170);
+    if (!covered){ standX = xx; break; }
+  }
+  if (standX === null) return { noOpenGround: true };
+
+  const states = [];
+  let lowPoint = -1e9, targetsDuringStoop = new Set();   // max y = lowest on screen
+  c.cool = 0;
+  for (let f = 0; f < 420; f++){
+    __g.fox.x = standX; __g.fox.y = 300; __g.fox.vy = 0;
+    __g.fox.onGround = true; __g.fox.inv = 999; __g.fox.hearts = 3;
+    await frame();
+    states.push(c.state);
+    if (c.state === 'stoop'){ targetsDuringStoop.add(Math.round(c.ty)); lowPoint = Math.max(lowPoint, c.y); }
+  }
+  const lowest = Math.max.apply(null, states.map(() => 0).concat([0]));
+  return {
+    sawFix: states.indexOf('fix') >= 0,
+    sawStoop: states.indexOf('stoop') >= 0,
+    sawClimb: states.indexOf('climb') >= 0,
+    // a committed dive re-aims once, not every frame
+    aimedOnce: targetsDuringStoop.size <= 2,
+    aims: targetsDuringStoop.size,
+    gotLow: lowPoint > -1e9 ? Math.round(lowPoint) : null,
+    foxY: 300, lowest: lowest
+  };
+});
+check('an owl fixes before it stoops', owlHunt && owlHunt.sawFix, 'fix seen');
+check('an owl actually stoops', owlHunt && owlHunt.sawStoop, 'stoop seen');
+check('and climbs back out', owlHunt && owlHunt.sawClimb, 'climb seen');
+check('a stoop is aimed once, not re-aimed every frame',
+      owlHunt && owlHunt.aimedOnce, owlHunt ? owlHunt.aims + ' target(s) per dive' : '-');
+check('a stoop reaches the fox', owlHunt && owlHunt.gotLow !== null &&
+      owlHunt.gotLow > 200, 'dived to y=' + (owlHunt && owlHunt.gotLow));
+
+const owlCover = await p.evaluate(async () => {
+  const frame = () => new Promise(r => requestAnimationFrame(r));
+  let c = null, lv = 0;
+  for (let i = 0; i < __g.levels.length && !c; i++){
+    __g.goto(i); lv = i; c = __g.critters().find(k => k.kind === 'owl') || null;
+  }
+  const L = __g.levels[lv];
+  // stand under a ledge inside the owl's beat
+  const shelter = L.plats.find(p => p.x + p.w > c.a && p.x < c.b && p.y < 300 - 40);
+  if (!shelter) return { noShelter: true };
+  const sx = shelter.x + shelter.w / 2;
+  c.cool = 0; c.state = 'patrol';
+  const states = [];
+  for (let f = 0; f < 320; f++){
+    __g.fox.x = sx; __g.fox.y = 300; __g.fox.vy = 0;
+    __g.fox.onGround = true; __g.fox.inv = 999; __g.fox.hearts = 3;
+    await frame();
+    states.push(c.state);
+  }
+  return { stooped: states.indexOf('stoop') >= 0, hearts: __g.fox.hearts };
+});
+check('under cover, the owl never commits to a stoop',
+      owlCover && owlCover.stooped === false, owlCover && owlCover.noShelter
+        ? 'NO SHELTER IN THE BEAT' : 'broke off');
+
+const owlRule = await p.evaluate(() => {
+  const L = { name:'probe', w:1600, den:1500, sky:['#000','#000'], hillA:'#000',
+    hillB:'#000', dirt:'#000', crust:'#000', ground:[[0,1600]], plats:[],
+    dates:[], melons:[], flowers:[], spikes:[], scorps:[], jerboas:[],
+    caracals:[], owls:[{ x:300, y:110, a:200, b:900 }] };
+  return __g.audit(L).problems.filter(s => s.indexOf('shelter under') >= 0).length;
+});
+check('an owl beat with no cover is a level fault', owlRule > 0, owlRule + ' reported');
+
+/* ---------------- the jerboa is worth the chase ---------------- */
+const jerboaWorth = await p.evaluate(async () => {
+  let c = null;
+  for (let i = 0; i < __g.levels.length && !c; i++){
+    __g.goto(i); c = __g.critters().find(k => k.kind === 'jerboa') || null;
+  }
+  __g.fox.bounds = 0; __g.fox.charge = 0; __g.fox.inv = 999; __g.fox.hearts = 3;
+  __g.fox.x = c.x; __g.fox.y = c.y;
+  for (let i = 0; i < 20; i++) await new Promise(r => requestAnimationFrame(r));
+  return { caught: !c.alive, bounds: __g.fox.bounds };
+});
+check('one jerboa is worth a whole Bound',
+      jerboaWorth.caught && jerboaWorth.bounds === 1,
+      'caught=' + jerboaWorth.caught + ' bounds=' + jerboaWorth.bounds);
+
 const guide = await p.evaluate(async () => {
   __g.resetGuide();            // earlier checks have already met everything
   __g.goto(0);
