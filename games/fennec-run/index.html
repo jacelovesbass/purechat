@@ -59,6 +59,12 @@
   .btn.jump { width: 96px; height: 96px; font-size: 15px; letter-spacing: .04em;
               background: #E8A563; color: #3A2A18 }
   .btn.on { background: #D98C3C; color: #fff }
+  /* The labels are generated content, not text nodes. Generated content cannot
+     be selected, so there is nothing for a long press to offer to magnify. */
+  #bL::after { content: "\25C0" }
+  #bR::after { content: "\25B6" }
+  #bJ::after { content: "JUMP" }
+  .btn::after { pointer-events: none }
 
   /* ---- cards ---- */
   #card {
@@ -108,11 +114,11 @@
   </div>
   <div id="pads">
     <div class="pad">
-      <div class="btn" id="bL">&#9664;</div>
-      <div class="btn" id="bR">&#9654;</div>
+      <div class="btn" id="bL" role="button" aria-label="Run left"></div>
+      <div class="btn" id="bR" role="button" aria-label="Run right"></div>
     </div>
     <div class="pad">
-      <div class="btn jump" id="bJ">JUMP</div>
+      <div class="btn jump" id="bJ" role="button" aria-label="Jump"></div>
     </div>
   </div>
   <div id="card"><div class="inner" id="inner"></div></div>
@@ -411,35 +417,70 @@ addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 // Each button remembers which finger is holding it. Without that, releasing the
 // jump finger would also release the run button you are still pressing, and a
 // thumb that slides off a button mid-jump would leave it stuck down for good.
-function bindBtn(el, set){
-  let id = null;
-  const on = e => {
-    e.preventDefault();
-    if (id !== null) return;
-    id = e.pointerId;
-    try { el.setPointerCapture(id); } catch (_) { /* capture is a nicety */ }
-    set(true); el.classList.add('on');
-  };
-  const off = e => {
-    if (id === null || e.pointerId !== id) return;   // somebody else's finger
-    id = null; set(false); el.classList.remove('on');
-  };
-  el.addEventListener('pointerdown', on);
-  el.addEventListener('pointerup', off);
-  el.addEventListener('pointercancel', off);
-  // Backstop for the case where capture was never granted and the finger lifted
-  // somewhere else entirely. Matched on pointerId, so it never clears a button
-  // a different finger is still holding.
-  addEventListener('pointerup', off);
-  addEventListener('pointercancel', off);
+/* The controls hold no state of their own.
+   An earlier version remembered which pointerId had pressed each button and
+   waited for that exact id to release it. One missed pointerup (the browser
+   eats them: a notification, an app switch, a gesture it decides to own) left
+   the button held down AND deaf to every press afterwards, because it was
+   still waiting for a finger that was long gone.
+   So: held is recomputed from the set of touches currently on the glass, every
+   time anything happens. A release that never arrives cannot strand anything,
+   because the next recompute simply does not see that pointer. */
+const BTN = [
+  { k:'L', el: document.getElementById('bL') },
+  { k:'R', el: document.getElementById('bR') },
+  { k:'J', el: document.getElementById('bJ') }
+];
+const SLOP = 12;                       // thumbs are not precise
+const active = new Map();              // pointerId -> {x, y}
+
+function overBtn(b, p){
+  const r = b.el.getBoundingClientRect();
+  return p.x >= r.left - SLOP && p.x <= r.right + SLOP &&
+         p.y >= r.top  - SLOP && p.y <= r.bottom + SLOP;
 }
-// Belt and braces for the selection itself: some browsers start a selection from
-// a drag that began on a control regardless of user-select.
+function onAnyBtn(p){ return BTN.some(b => overBtn(b, p)); }
+
+function refresh(){
+  const now = { L:false, R:false, J:false };
+  for (const p of active.values())
+    for (const b of BTN) if (overBtn(b, p)) now[b.k] = true;
+  if (now.J && !held.J) fox.buffer = 8;        // rising edge only
+  for (const b of BTN){
+    held[b.k] = now[b.k];
+    b.el.classList.toggle('on', now[b.k]);
+  }
+}
+
+addEventListener('pointerdown', e => {
+  const p = { x:e.clientX, y:e.clientY };
+  if (onAnyBtn(p)) e.preventDefault();
+  active.set(e.pointerId, p);
+  refresh();
+});
+addEventListener('pointermove', e => {
+  if (!active.has(e.pointerId)) return;
+  active.set(e.pointerId, { x:e.clientX, y:e.clientY });
+  refresh();                                   // slide between buttons like a d-pad
+});
+const lift = e => { active.delete(e.pointerId); refresh(); };
+addEventListener('pointerup', lift);
+addEventListener('pointercancel', lift);
+addEventListener('lostpointercapture', lift);
+// Anything that takes the page away takes the fingers with it.
+addEventListener('blur', () => { active.clear(); refresh(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden){ active.clear(); refresh(); }
+});
+
+// iOS decides on a long press whether to show the magnifier and the selection
+// handles, and it makes that call from the touch sequence, not the pointer one.
+// Refusing the touch default on the control bar is what actually stops it.
+const padBar = document.getElementById('pads');
+for (const ev of ['touchstart', 'touchmove', 'touchend'])
+  padBar.addEventListener(ev, e => e.preventDefault(), { passive: false });
 for (const ev of ['selectstart', 'dragstart', 'contextmenu'])
   addEventListener(ev, e => e.preventDefault());
-bindBtn(document.getElementById('bL'), v => held.L = v);
-bindBtn(document.getElementById('bR'), v => held.R = v);
-bindBtn(document.getElementById('bJ'), v => { if (v && !held.J) fox.buffer = 8; held.J = v; });
 // Show the control bar only where there is no mouse. "pointer: coarse" alone is true
 // in a good few desktop browsers, which costs a laptop player a third of the screen.
 if (matchMedia('(hover: none) and (pointer: coarse)').matches ||

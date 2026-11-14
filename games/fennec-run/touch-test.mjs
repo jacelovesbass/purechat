@@ -112,6 +112,75 @@ const stuck = await p.evaluate(async () => {
 check('sliding off the button releases it', Math.abs(stuck.vx) < 0.2, 'vx=' + stuck.vx);
 check('the button does not stay lit', !stuck.lit);
 
+// --- the reported fault: a press whose release never arrives must not leave the
+//     button held, and must not make it deaf to the next press
+const lost = await p.evaluate(async () => {
+  const R = document.getElementById('bR');
+  const r = R.getBoundingClientRect();
+  const pt = [r.x + r.width/2, r.y + r.height/2];
+  const fire = (type, id, at, target) => (target || window).dispatchEvent(
+    new PointerEvent(type, { bubbles:true, cancelable:true, pointerId:id,
+      pointerType:'touch', clientX:at[0], clientY:at[1] }));
+  const frames = n => new Promise(async res => {
+    for (let i = 0; i < n; i++) await new Promise(r => requestAnimationFrame(r)); res(); });
+
+  __g.fox.x = 120; __g.fox.y = 300; __g.fox.vx = 0; __g.fox.vy = 0; __g.fox.onGround = true;
+
+  fire('pointerdown', 20, pt, R);
+  await frames(10);
+  const whileHeld = __g.fox.vx;
+
+  // the browser eats the release entirely, then the page is backgrounded
+  document.dispatchEvent(new Event('visibilitychange'));
+  Object.defineProperty(document, 'hidden', { configurable:true, get: () => true });
+  document.dispatchEvent(new Event('visibilitychange'));
+  await frames(40);
+  const afterLoss = __g.fox.vx;
+  Object.defineProperty(document, 'hidden', { configurable:true, get: () => false });
+
+  // and now the button must still work
+  fire('pointerdown', 21, pt, R);
+  await frames(12);
+  const pressedAgain = __g.fox.vx;
+  fire('pointerup', 21, pt, R);
+  await frames(30);
+  return { whileHeld:+whileHeld.toFixed(2), afterLoss:+afterLoss.toFixed(2),
+           pressedAgain:+pressedAgain.toFixed(2), lit: R.classList.contains('on') };
+});
+check('a held button runs', lost.whileHeld > 1, 'vx=' + lost.whileHeld);
+check('a release that never arrives still releases', Math.abs(lost.afterLoss) < 0.2,
+      'vx=' + lost.afterLoss);
+check('the button still responds to the next press', lost.pressedAgain > 1,
+      'vx=' + lost.pressedAgain);
+check('and is not left lit', !lost.lit);
+
+// --- sliding from one button to the other should hand over, like a d-pad
+const slide = await p.evaluate(async () => {
+  const L = document.getElementById('bL'), R = document.getElementById('bR');
+  const c = el => { const r = el.getBoundingClientRect();
+    return [r.x + r.width/2, r.y + r.height/2]; };
+  const fire = (t, at) => window.dispatchEvent(new PointerEvent(t,
+    { bubbles:true, cancelable:true, pointerId:30, pointerType:'touch',
+      clientX:at[0], clientY:at[1] }));
+  const frames = n => new Promise(async res => {
+    for (let i = 0; i < n; i++) await new Promise(r => requestAnimationFrame(r)); res(); });
+  __g.fox.x = 400; __g.fox.vx = 0;
+  fire('pointerdown', c(R)); await frames(14);
+  const right = __g.fox.vx;
+  fire('pointermove', c(L)); await frames(22);
+  const left = __g.fox.vx;
+  fire('pointerup', c(L)); await frames(30);
+  return { right:+right.toFixed(2), left:+left.toFixed(2) };
+});
+check('sliding onto the other button hands over', slide.right > 1 && slide.left < -1,
+      'right vx=' + slide.right + ' then left vx=' + slide.left);
+
+// --- nothing in the control bar is a text node any more
+const texts = await p.evaluate(() =>
+  ['bL','bR','bJ'].map(id => document.getElementById(id).textContent.trim()));
+check('buttons contain no selectable text', texts.every(t => t === ''),
+      JSON.stringify(texts));
+
 await b.close();
 console.log(errs.length ? '\nPAGE ERRORS:\n' + errs.join('\n') : '\nno page errors');
 console.log(bad.length ? '\n' + bad.length + ' FAILED' : '\nall ' + ok.length + ' touch checks passed');
