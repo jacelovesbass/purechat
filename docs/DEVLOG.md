@@ -72,7 +72,14 @@ second one wrong is how a chat becomes unusable while every test still passes.
 message is a negative y, so the press landed on the header. Scroll into view
 first.
 
-**Not deployed.** Built, linted and tested locally only.
+**Deployed and checked against the live site, not the terminal.** Pushed as
+`fb4974b`, the Pages action green, `version.json` serving that exact SHA, and
+the published bundle grepped for the feature rather than assumed to carry it.
+Then the whole suite re-run with `TEST_URL` pointed at
+https://jacelovesbass.github.io/purechat/: **155 of 155 against production**,
+teardown leaving the two real rooms alone. This project has had two deploys
+go green locally while the live site sat on an old build, which is why the
+check is the served file and not the build log.
 
 ---
 
