@@ -87,6 +87,32 @@ the app cannot tell the difference.
 
 ---
 
+## 12. A bump is a credited copy, and the chat does not decide which kinds allow it
+**2026-11-20.** Holding a message and bumping it puts a **copy** at the end of
+the conversation, never a move: the original stays where it was, so the
+history cannot be rewritten by resurfacing something. The copy carries **both
+names**, the person who said it and the person who brought it back, because
+the two simpler options both have the app assert something untrue about who
+said what. Bumping a bump re-bumps the original rather than nesting.
+
+It needed no migration: `kind` plus `payload` from migration 009 is the
+contract for exactly this, and `body` still carries the plain text so anything
+reading rows finds the words.
+
+**What cannot be bumped is declared by the tool, not listed in the chat.** A
+renderer that writes back to its own row is a live board, not a record; a copy
+of one would be a second board claiming to be the first. Such a tool sets
+`render: { live: true }`. The alternative, a list of kind names inside
+`Chat.jsx`, gives the wrong answer for the first tool nobody here wrote, which
+is the case the whole tool contract exists to serve.
+
+**Known cost, accepted on that occasion.** A custom hold means the browser's
+own text selection has to go, so text cannot be selected out of a bubble. The
+MD was told and chose Bump alone; Copy belongs in the menu the first time
+anyone asks for it.
+
+---
+
 ## Open, and deliberately not decided
 
 ### The database is readable by anyone

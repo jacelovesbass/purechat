@@ -62,6 +62,13 @@ carries the move list, updated on every turn; the chat subscribes to UPDATE as
 well as INSERT so the other phone sees it. If you write a renderer that edits
 its own row, that is the path.
 
+**If it does, say so: `render: { kind, Component, live: true }`.** `live` means
+the message IS the thing, rewritten as it goes, rather than a record of
+something that happened. The chat needs this to know what it may copy: holding
+a message offers Bump, and a copy of a live board would be a second board
+claiming to be the first. Anything that makes a second thing out of a message,
+now or later, asks the same question. A score card is not live; a board is.
+
 ## Adding one
 
 1. Write `src/tools/<id>.jsx` exporting the object above.

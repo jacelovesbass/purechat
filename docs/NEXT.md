@@ -6,8 +6,16 @@ forgotten everything. Read this, then `docs/PROPOSAL.md` for the reasoning.
 ## Where it is up to
 
 Pure Chat is live at https://jacelovesbass.github.io/purechat/ and in daily use
-by a group of four. Emoji packs, GIF library and single-player games all work.
-**61 tests pass against the deployed site**, not just locally.
+by a group of four. Emoji packs, GIF library, single-player games, a Versus
+board and message bumping all work. **155 checks across 20 suites pass**, and
+they can be pointed at the deployed site with `TEST_URL`.
+
+**Holding a message opens a menu** (`src/lib/press.js`, `MessageRow.jsx`,
+`MessageMenu.jsx`). One action today, Bump, which puts a credited copy at the
+end of the conversation. The reasoning is decision 12; the thing to know
+before touching it is that the hold gesture cost text selection inside
+bubbles, so **Copy is the first action to add** when anyone asks why they
+cannot copy a message.
 
 ## If you are here to build games
 

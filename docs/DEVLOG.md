@@ -8,6 +8,74 @@ that would otherwise have to be rediscovered.
 
 ---
 
+## 2026-11-20 — Holding a message, and bumping it back to the bottom
+
+Three things the MD asked for, and they turn out to be one thing: a
+conversation only has a bottom, so anything above it is gone.
+
+**Holding a message now opens a menu.** A gesture the app owns rather than the
+browser: pointer events, 450 ms, cancelled by a second finger or by any real
+movement, because a scroll starts life as a press and a hold that fires on a
+scroll makes a chat unusable. Right click is the same intent on a desktop.
+
+**Bump puts a copy at the end, credited both ways.** "Jason bumped Sam's
+message", the original words under it, and how old it is. Three things were
+decided rather than defaulted:
+
+- **A copy, not a move.** The original stays where it was, so the history
+  stays true and a bump cannot rewrite what a conversation looked like.
+- **Both names, always.** Posting somebody's words under your own name, or
+  under theirs as though they had just said them, are both lies the app would
+  be telling on their behalf. The card names who said it and who brought it
+  back, and reads correctly from either person's side, which took four
+  spellings rather than one string with a ternary in it.
+- **A bump of a bump is flat.** It re-bumps the original. A copy of a copy of
+  a copy says nothing anyone wants and grows the row every time.
+
+**No migration.** A bump is `kind: 'bump'` with the original in `payload`,
+which is exactly the contract migration 009 added. Its `body` is the original
+text as well, so anything reading plain rows still finds the words.
+
+**A live board cannot be bumped, and the registry says so rather than the
+chat.** Versus is one message rewritten on every turn, so a copy of it would
+be a second board claiming to be the first. The tool declares
+`render: { live: true }`; `Chat.jsx` holds no list of kind names. A tool
+nobody here wrote gets the right answer.
+
+**What it cost, and it is a real cost.** A custom hold and the browser's own
+text selection cannot both own the gesture: iOS starts selecting at about the
+moment our timer fires and stacks its callout over the sheet. So selection is
+off on bubbles, and text can no longer be dragged out of one. The MD chose
+Bump alone for now, knowing that; Copy is the first thing that should go in
+the menu when anybody notices.
+
+**Joining a group now lands on the newest message.** It used to animate, from
+wherever the list happened to be, through up to 200 old messages. Now the
+first jump is instant and every later one animates, and both only happen while
+you are at the bottom: reading back through the history is no longer
+interrupted every time somebody speaks. Bumping is the one deliberate
+exception, because the whole point is to watch it land.
+
+**The defect that one would have had anyway.** Pictures load after the message
+holding them, so the conversation grows taller underneath a jump that has
+already happened, and a group full of GIFs lands short of the bottom. Fixed by
+re-pinning on `load` in the capture phase, because an image's load event does
+not bubble.
+
+**155 checks pass, across 20 suites, against the local dev server.** The new
+suite is 17 of them, and the half worth keeping is the near misses: a tap must
+do nothing, and a drag that starts on a message must do nothing. Getting the
+second one wrong is how a chat becomes unusable while every test still passes.
+
+**Half an hour went on a test lying about where a message was.** Playwright's
+`boundingBox` reports where an off-screen element would be, which for a buried
+message is a negative y, so the press landed on the header. Scroll into view
+first.
+
+**Not deployed.** Built, linted and tested locally only.
+
+---
+
 ## 2026-11-12 — A person may own two phones
 
 The MD opened the app and found himself listed as **"Jason (2)"** in his own

@@ -533,3 +533,55 @@ button.link { background: none; color: var(--muted); padding: 4px; font-weight: 
 .kit-head { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
 .kit-actions { display: flex; gap: 8px; }
 .kit-actions .ghost { flex: 1; }
+
+/* ---------------------------------------------- Holding a message
+
+   A hold menu and the browser's own text selection cannot both own the
+   gesture: iOS starts selecting at about the moment our timer fires, and
+   stacks its callout over the sheet. So selection goes.
+
+   The cost is real and belongs written down: text can no longer be selected
+   out of a bubble, which is why Copy is the first thing that should go in the
+   menu the first time anybody asks for it. */
+.bubble.holdable {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* A hold with no feedback feels like a tap that failed. :active rather than
+   state, so pressing a message does not re-render the conversation. */
+.bubble.holdable:active { opacity: .82; }
+
+.menu-preview {
+  padding: 9px 13px;
+  margin-bottom: 14px;
+  border-radius: 14px;
+  background: var(--theirs);
+  max-height: 22vh;
+  overflow: hidden;
+}
+
+button.wide { width: 100%; }
+
+/* ---- A bumped message: a copy, and it has to look like one ---- */
+.bumped .bump-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.row.mine .bumped .bump-head,
+.row.mine .bumped .bump-when { color: rgba(255, 255, 255, .72); }
+
+.bumped .bump-mark { font-weight: 700; }
+
+.bumped .bump-body {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--line);
+}
+.row.mine .bumped .bump-body { border-top-color: rgba(255, 255, 255, .25); }
+
+.bumped .bump-when { margin-top: 4px; font-size: 11px; color: var(--muted); }

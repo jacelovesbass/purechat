@@ -6,7 +6,9 @@ import { readGame } from '../lib/games.js';
 import { installPack, installGame } from '../lib/install.js';
 import { encodeShortcodes } from '../lib/packs.js';
 import { Halo } from './Halo.jsx';
-import { Body } from './Body.jsx';
+import { MessageRow } from './MessageRow.jsx';
+import { MessageMenu } from './MessageMenu.jsx';
+import { bumpOf } from '../lib/bump.js';
 import { TOOLS } from '../tools/index.js';
 
 export function Chat({ name, room, onBack, onForget }) {
@@ -24,7 +26,14 @@ export function Chat({ name, room, onBack, onForget }) {
   // Which tool's sheet is open, by id. Chat does not know what any of them do.
   const [openTool, setOpenTool] = useState(null);
   const [sendErr, setSendErr] = useState('');
+  // The message being held down, and so the one the menu is about.
+  const [acting, setActing] = useState(null);
+  const main = useRef(null);
   const end = useRef(null);
+  // Pinned means you are looking at the newest message, which is where
+  // everyone sits unless they have deliberately scrolled up.
+  const pinned = useRef(true);
+  const landed = useRef(false);
 
   // Anyone in the room resolves an emoji id, so a person without the pack
   // still sees the picture rather than a word in colons.
@@ -226,7 +235,58 @@ export function Chat({ name, room, onBack, onForget }) {
     if (error) setSendErr(error.message);
   }
 
-  useEffect(() => { end.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs.length]);
+  const toEnd = (smooth = false) =>
+    end.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'end' });
+
+  // Arriving in a group puts you at the newest message, because that is the
+  // only part of a conversation anyone opens it to read.
+  //
+  // Two things this gets right that one smooth scroll did not. The first jump
+  // is INSTANT: animating it scrolls visibly through up to 200 old messages
+  // on the way down, which looks like the app loading the wrong thing. And it
+  // only happens while you are pinned, so reading back through the history is
+  // no longer interrupted every time somebody says something.
+  useEffect(() => {
+    if (!msgs.length || !pinned.current) return;
+    const smooth = landed.current;
+    landed.current = true;
+    toEnd(smooth);
+  }, [msgs.length]);
+
+  // Emoji and GIFs load after the message holding them, and every picture
+  // that arrives makes the conversation taller underneath the jump that has
+  // already happened. Without this, opening a group full of GIFs lands short
+  // of the bottom by however many were still loading.
+  useEffect(() => {
+    const el = main.current;
+    if (!el) return;
+    landed.current = false;
+    pinned.current = true;
+    const onScroll = () => {
+      pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    };
+    const grew = () => { if (pinned.current) toEnd(false); };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    // Capture, because an image's load event does not bubble. This also
+    // catches the keyboard opening, which resizes the list.
+    el.addEventListener('load', grew, true);
+    const ro = new ResizeObserver(grew);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      el.removeEventListener('load', grew, true);
+      ro.disconnect();
+    };
+  }, [room.id]);
+
+  /** Put a copy of an old message at the end of the conversation. */
+  async function bump(m) {
+    setActing(null);
+    // Bumping is an answer to "nobody saw that", so the person bumping goes
+    // back to the bottom to see it land even if they were reading history.
+    pinned.current = true;
+    await sendStructured(bumpOf(m, name));
+  }
 
   async function send(e) {
     e.preventDefault();
@@ -297,21 +357,23 @@ export function Chat({ name, room, onBack, onForget }) {
         </div>
       )}
 
-      <main>
+      {acting && (
+        <MessageMenu message={acting} byId={byId} name={name}
+                     onBump={() => bump(acting)} onClose={() => setActing(null)} />
+      )}
+
+      <main ref={main}>
         {msgs.length === 0 && <p className="muted empty">No messages yet. Say something.</p>}
-        {msgs.map((m, i) => {
-          const mine = m.author === name;
-          const runOn = i > 0 && msgs[i - 1].author === m.author;
-          return (
-            <div key={m.id} className={'row ' + (mine ? 'mine' : 'theirs')}>
-              <div className="bubble">
-                {!mine && !runOn && <div className="who">{m.author}</div>}
-                <Body message={m} body={m.body} byId={byId}
-                      name={name} onUpdate={patch} onSend={sendStructured} />
-              </div>
-            </div>
-          );
-        })}
+        {msgs.map((m, i) => (
+          <MessageRow
+            key={m.id} m={m}
+            mine={m.author === name}
+            runOn={i > 0 && msgs[i - 1].author === m.author}
+            byId={byId} name={name}
+            onUpdate={patch} onSend={sendStructured}
+            onHold={setActing}
+          />
+        ))}
         <div ref={end} />
       </main>
 

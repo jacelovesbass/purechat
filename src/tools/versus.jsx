@@ -202,5 +202,7 @@ export const versusTool = {
   label: 'Versus',
   icon: '⚔️',
   Sheet: VersusSheet,
-  render: { kind: 'versus', Component: Board },
+  // Live: the board IS the message, rewritten on every turn. It cannot be
+  // copied, bumped or quoted, because a copy would be a second board.
+  render: { kind: 'versus', Component: Board, live: true },
 };
